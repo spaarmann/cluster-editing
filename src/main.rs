@@ -1,5 +1,4 @@
-use cluster_editing::graphviz;
-use cluster_editing::parser;
+use cluster_editing::{algo, graphviz, parser, Graph};
 
 use std::error::Error;
 use std::path::PathBuf;
@@ -36,13 +35,18 @@ struct Opt {
 fn main() -> Result<(), Box<dyn Error>> {
     let opt = Opt::from_args();
 
-    let graph: Graph<u32, u8, Undirected, u32> = match opt.input {
+    let graph: Graph = match opt.input {
         Some(path) => parser::parse_file(path),
         None => parser::parse(std::io::stdin().lock()),
     }?;
 
     if let Some(path) = opt.print_input {
         graphviz::print_graph(path, &graph);
+    }
+
+    let components = algo::split_into_connected_components(&graph);
+    for (i, c) in components.into_iter().enumerate() {
+        graphviz::print_graph(format!("component{}.png", i), &c);
     }
 
     // TODO: Do stuff with the graph
