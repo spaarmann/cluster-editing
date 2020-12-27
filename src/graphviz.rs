@@ -1,3 +1,4 @@
+use log::info;
 use petgraph::dot::{Config, Dot};
 use petgraph::visit::{GraphProp, GraphRef, IntoEdgeReferences, IntoNodeReferences, NodeIndexable};
 
@@ -11,9 +12,11 @@ where
     G::EdgeWeight: Display,
     G::NodeWeight: Display,
 {
+    info!("Writing graph image to {}", path.as_ref().display());
+
     let dot = Dot::with_config(graph, &[Config::EdgeNoLabel]);
 
-    let mut graphviz = Command::new("neato")
+    let mut graphviz = Command::new("fdp")
         .arg("-Tpng")
         .arg(format!("-o{}", path.as_ref().display()))
         .stdin(Stdio::piped())

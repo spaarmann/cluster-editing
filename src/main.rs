@@ -3,6 +3,7 @@ use cluster_editing::{algo, graphviz, parser, Graph};
 use std::error::Error;
 use std::path::PathBuf;
 
+use log::info;
 use petgraph::prelude::*;
 use structopt::StructOpt;
 
@@ -33,6 +34,10 @@ struct Opt {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+
+    info!("Starting solver...");
+
     let opt = Opt::from_args();
 
     let graph: Graph = match opt.input {
@@ -45,15 +50,40 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let components = algo::split_into_connected_components(&graph);
+
+    info!(
+        "Decomposed input graph into {} components",
+        components.len()
+    );
+
+    let mut result = graph.clone();
+
     for (i, c) in components.into_iter().enumerate() {
-        graphviz::print_graph(format!("component{}.png", i), &c);
+        info!("Solving component {}...", i);
+        let (k, edits) = algo::find_optimal_cluster_editing(&c);
+        info!(
+            "Found a cluster editing of {} edits for component {}: {:?}",
+            k, i, edits
+        );
+
+        for edit in edits {
+            match edit {
+                algo::Edit::Insert((u, v)) => {
+                    result.add_edge(NodeIndex::new(u as usize), NodeIndex::new(v as usize), 0);
+                }
+                algo::Edit::Delete((u, v)) => {
+                    result.remove_edge(
+                        result
+                            .find_edge(NodeIndex::new(u as usize), NodeIndex::new(v as usize))
+                            .unwrap(),
+                    );
+                }
+            };
+        }
     }
 
-    // TODO: Do stuff with the graph
-    let output = graph;
-
     if let Some(path) = opt.print_output {
-        graphviz::print_graph(path, &output);
+        graphviz::print_graph(path, &result);
     }
 
     Ok(())
