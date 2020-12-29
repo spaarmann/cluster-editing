@@ -1,4 +1,4 @@
-use cluster_editing::{algo, graphviz, parser, Graph};
+use cluster_editing::{algo, graphviz, parser, Graph, PetGraph};
 
 use std::error::Error;
 use std::path::PathBuf;
@@ -40,7 +40,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let opt = Opt::from_args();
 
-    let graph: Graph = match opt.input {
+    let graph: PetGraph = match opt.input {
         Some(path) => parser::parse_file(path),
         None => parser::parse(std::io::stdin().lock()),
     }?;
@@ -60,7 +60,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     for (i, c) in components.into_iter().enumerate() {
         info!("Solving component {}...", i);
-        let (k, edits) = algo::find_optimal_cluster_editing(&c);
+        let (cg, imap) = Graph::new_from_petgraph(&c);
+        let (k, edits) = algo::find_optimal_cluster_editing(&cg);
         info!(
             "Found a cluster editing of {} edits for component {}: {:?}",
             k, i, edits
@@ -69,12 +70,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         for edit in edits {
             match edit {
                 algo::Edit::Insert((u, v)) => {
-                    result.add_edge(NodeIndex::new(u as usize), NodeIndex::new(v as usize), 0);
+                    result.add_edge(NodeIndex::new(imap[u]), NodeIndex::new(imap[v]), 0);
                 }
                 algo::Edit::Delete((u, v)) => {
                     result.remove_edge(
                         result
-                            .find_edge(NodeIndex::new(u as usize), NodeIndex::new(v as usize))
+                            .find_edge(NodeIndex::new(imap[u]), NodeIndex::new(imap[v]))
                             .unwrap(),
                     );
                 }

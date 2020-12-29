@@ -16,7 +16,7 @@ fn make_error(text: &'static str) -> io::Error {
 
 pub fn parse_file<G, P: AsRef<std::path::Path>>(path: P) -> io::Result<G>
 where
-    G: Create + Build<NodeWeight = u32>,
+    G: Create + Build<NodeWeight = usize>,
     G::EdgeWeight: Default,
 {
     let file = File::open(path)?;
@@ -26,7 +26,7 @@ where
 
 pub fn parse<G, R: BufRead>(reader: R) -> io::Result<G>
 where
-    G: Create + Build<NodeWeight = u32>,
+    G: Create + Build<NodeWeight = usize>,
     G::EdgeWeight: Default,
 {
     let mut lines = reader.lines();
@@ -59,7 +59,7 @@ where
 
     let mut node_ids = Vec::with_capacity(n);
     for i in 0..n {
-        node_ids.push(graph.add_node(i as u32));
+        node_ids.push(graph.add_node(i));
     }
 
     for line in lines {

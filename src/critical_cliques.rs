@@ -1,4 +1,4 @@
-use crate::Graph;
+use crate::PetGraph;
 
 use std::collections::HashSet;
 
@@ -6,11 +6,11 @@ use petgraph::graph::NodeIndex;
 
 #[derive(Debug, Clone, Default)]
 pub struct CritClique {
-    pub vertices: Vec<u32>,
+    pub vertices: Vec<usize>,
     pub node_indices: Vec<NodeIndex>,
 }
 
-pub fn find_crit_cliques(g: &Graph) -> Vec<CritClique> {
+pub fn find_crit_cliques(g: &PetGraph) -> Vec<CritClique> {
     let mut cliques = Vec::new();
 
     // TODO: This looks at least O(n^2) but should apparently be do-able in O(n + m), so have

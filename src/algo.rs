@@ -1,16 +1,16 @@
-use crate::Graph;
+use crate::{Graph, PetGraph};
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 
 use log::{info, trace};
-use petgraph::{graph::NodeIndex, visit::EdgeRef};
+use petgraph::visit::EdgeRef;
 
-pub fn split_into_connected_components(g: &Graph) -> Vec<Graph> {
+pub fn split_into_connected_components(g: &PetGraph) -> Vec<PetGraph> {
     let ccs = petgraph::algo::tarjan_scc(g);
 
     ccs.into_iter()
         .map(|cc| {
-            let mut component = Graph::with_capacity(cc.len(), cc.len());
+            let mut component = PetGraph::with_capacity(cc.len(), cc.len());
             let mut index_map = HashMap::with_capacity(cc.len());
             for v in cc {
                 let new_idx = component.add_node(g[v]);
@@ -31,28 +31,6 @@ pub fn split_into_connected_components(g: &Graph) -> Vec<Graph> {
         .collect()
 }
 
-type WeightMap = HashMap<(u32, u32), f32>;
-
-/// Creates a map storing the edge weights used internally by the algorithm from an input graph.
-/// Map will contain all pairs (u, v), u < v as keys where u and v are the indices of the vertices in the
-/// input graph; these are stored as weights in the petgraph structures.
-/// Edges existing in the input graph are assigned weight 1, edges not existing are assigned -1.
-fn create_weight_map(g: &Graph) -> WeightMap {
-    let mut map = HashMap::new();
-
-    for u in g.node_indices() {
-        for v in g.node_indices() {
-            let u_w = *g.node_weight(u).unwrap();
-            let v_w = *g.node_weight(v).unwrap();
-            if u_w < v_w {
-                map.insert((u_w, v_w), g.find_edge(u, v).map(|_| 1.0).unwrap_or(-1.0));
-            }
-        }
-    }
-
-    map
-}
-
 //#[derive(Copy, Clone, Debug)]
 //pub enum Edge {
 //    Original(u32, u32),
@@ -61,39 +39,23 @@ fn create_weight_map(g: &Graph) -> WeightMap {
 
 #[derive(Copy, Clone, Debug)]
 pub enum Edit {
-    Insert((u32, u32)),
-    Delete((u32, u32)),
-}
-
-/// Graph structure used internally by the algorithm to store
-/// the petgraph Graph, the weight map, and a mapping of merged
-/// vertices to what they were originally.
-#[derive(Clone)]
-struct RGraph {
-    g: Graph,
-    w: WeightMap,
-    merged: HashMap<u32, (u32, u32)>,
+    Insert((usize, usize)),
+    Delete((usize, usize)),
 }
 
 pub fn find_optimal_cluster_editing(g: &Graph) -> (i32, Vec<Edit>) {
     let mut k = 0.0;
-    let weights = create_weight_map(&g);
 
     // TODO: Not sure if executing the algo once with k = 0 is the best
     // way of handling already-disjoint-clique-components.
 
     info!(
-        "Computing optimal solution for graph with {} nodes and {} edges.",
-        g.node_count(),
-        g.edge_count()
+        "Computing optimal solution for graph with {} nodes.",
+        g.node_count()
     );
 
     loop {
-        let rg = RGraph {
-            g: g.clone(),
-            w: weights.clone(),
-            merged: HashMap::new(),
-        };
+        let g = g.clone();
 
         trace!("[driver] Starting search with k={}", k);
 
@@ -101,7 +63,7 @@ pub fn find_optimal_cluster_editing(g: &Graph) -> (i32, Vec<Edit>) {
             K_MAX = k;
         }
 
-        if let Some((rg, edits)) = find_cluster_editing(rg, Vec::new(), k) {
+        if let Some((g, edits)) = find_cluster_editing(g, Vec::new(), k) {
             // TODO: Depending on what exactly we need to output, this might
             // need to turn edits for merged vertices etc. back into the expected
             // things.
@@ -119,11 +81,7 @@ static mut K_MAX: f32 = 0.0;
 /// was found.
 // `k` is stored as float because it needs to be compared with and changed by values from
 // the WeightMap a lot, which are floats.
-fn find_cluster_editing(
-    mut rg: RGraph,
-    mut edits: Vec<Edit>,
-    k: f32,
-) -> Option<(RGraph, Vec<Edit>)> {
+fn find_cluster_editing(mut g: Graph, mut edits: Vec<Edit>, k: f32) -> Option<(Graph, Vec<Edit>)> {
     // TODO: Finish up the reduction (mainly merging vertices) and enable it.
     //reduce(rg, &mut k);
 
@@ -140,23 +98,22 @@ fn find_cluster_editing(
     // Search for a conflict triple
     // TODO: Surely this can be done a little smarter?
     let mut triple = None;
-    'outer: for u in rg.g.node_indices() {
-        for v in rg.g.node_indices() {
-            let uv = rg.g.find_edge(u, v);
-
-            if uv.is_none() {
+    'outer: for u in g.nodes() {
+        for v in g.nodes() {
+            if u == v {
                 continue;
             }
 
-            for w in rg.g.node_indices() {
+            if !g.has_edge(u, v) {
+                continue;
+            }
+
+            for w in g.nodes() {
                 if v == w || u == w {
                     continue;
                 }
 
-                let uw = rg.g.find_edge(u, w);
-                let vw = rg.g.find_edge(v, w);
-
-                if uw.is_some() && vw.is_none() {
+                if g.has_edge(u, w) && !g.has_edge(v, w) {
                     // `vuw` is a conflict triple!
                     triple = Some((v, u, w));
                     break 'outer;
@@ -168,7 +125,7 @@ fn find_cluster_editing(
     let (v, u, w) = match triple {
         None => {
             // No more conflict triples, this graph is solved!
-            return Some((rg, edits));
+            return Some((g, edits));
         }
         Some(t) => t,
     };
@@ -179,68 +136,76 @@ fn find_cluster_editing(
         k
     );
 
-    let v_i = *rg.g.node_weight(v).unwrap();
-    let u_i = *rg.g.node_weight(u).unwrap();
-    let w_i = *rg.g.node_weight(w).unwrap();
-
     // Found a conflict triple, now branch into 3 cases:
 
     // 1. Insert vw, set uv, uw, vw to permanent
     {
-        let mut rg = rg.clone();
+        let mut g = g.clone();
         let mut edits = edits.clone();
-        let k = k + rg.get_weight(v_i, w_i);
-        let res = if k >= 0.0 {
-            rg.g.add_edge(v, w, 0);
-            edits.push(Edit::Insert((v_i, w_i)));
-            rg.set_weight(v_i, w_i, f32::INFINITY);
-            rg.set_weight(u_i, w_i, f32::INFINITY);
-            rg.set_weight(u_i, v_i, f32::INFINITY);
-            find_cluster_editing(rg, edits, k)
-        } else {
-            None
-        };
+        let vw = g.get_mut(v, w);
+        // TODO: Might not need this check after edge merging is in? Maybe?
+        if vw.is_finite() {
+            let k = k + *vw;
+            trace!("[1] Calc'd k = {}, from edge weight {}", k, *vw);
+            let res = if k >= 0.0 {
+                *vw = f32::INFINITY;
+                edits.push(Edit::Insert((v, w)));
+                g.set(u, w, f32::INFINITY);
+                g.set(u, v, f32::INFINITY);
+                find_cluster_editing(g, edits, k)
+            } else {
+                None
+            };
 
-        if res.is_some() {
-            return res;
+            if res.is_some() {
+                return res;
+            }
         }
     }
 
     // 2. Delete uv, set uw to permanent, and set uv and vw to forbidden
     {
-        let mut rg = rg.clone();
+        let mut g = g.clone();
         let mut edits = edits.clone();
-        let k = k - rg.get_weight(u_i, v_i);
-        let res = if k >= 0.0 {
-            rg.g.remove_edge(rg.g.find_edge(u, v).unwrap());
-            edits.push(Edit::Delete((u_i, v_i)));
-            rg.set_weight(u_i, w_i, f32::INFINITY);
-            rg.set_weight(u_i, v_i, f32::NEG_INFINITY);
-            rg.set_weight(v_i, w_i, f32::NEG_INFINITY);
-            find_cluster_editing(rg, edits, k)
-        } else {
-            None
-        };
+        let uv = g.get_mut(u, v);
+        // TODO: Might not need this check after edge merging is in? Maybe?
+        if uv.is_finite() {
+            let k = k - *uv;
+            trace!("[2] Calc'd k = {}, from edge weight {}", k, *uv);
+            let res = if k >= 0.0 {
+                *uv = f32::NEG_INFINITY;
+                edits.push(Edit::Delete((u, v)));
+                g.set(u, w, f32::INFINITY);
+                g.set(v, w, f32::NEG_INFINITY);
+                find_cluster_editing(g, edits, k)
+            } else {
+                None
+            };
 
-        if res.is_some() {
-            return res;
+            if res.is_some() {
+                return res;
+            }
         }
     }
 
     // 3. Delete uw, set uw to forbidden
     {
-        let k = k - rg.get_weight(u_i, w_i);
-        let res = if k >= 0.0 {
-            rg.g.remove_edge(rg.g.find_edge(u, w).unwrap());
-            edits.push(Edit::Delete((u_i, w_i)));
-            rg.set_weight(u_i, w_i, f32::NEG_INFINITY);
-            find_cluster_editing(rg, edits, k)
-        } else {
-            None
-        };
+        let uw = g.get_mut(u, w);
+        // TODO: Might not need this check after edge merging is in? Maybe?
+        if uw.is_finite() {
+            let k = k - *uw;
+            trace!("[3] Calc'd k = {}, from edge weight {}", k, *uw);
+            let res = if k >= 0.0 {
+                *uw = f32::NEG_INFINITY;
+                edits.push(Edit::Delete((u, w)));
+                find_cluster_editing(g, edits, k)
+            } else {
+                None
+            };
 
-        if res.is_some() {
-            return res;
+            if res.is_some() {
+                return res;
+            }
         }
     }
 
@@ -250,28 +215,6 @@ fn find_cluster_editing(
 /// Reduces the problem instance. Modifies the mutable arguments directly to be a smaller
 /// instance. If this discovers the instance is not solvable at all, returns `None`. Otherwise
 /// returns the list of edits performed (which may be empty).
-fn reduce(rg: &mut RGraph, k: &mut f32) -> Option<Vec<Edit>> {
+fn reduce(g: &mut Graph, k: &mut f32) -> Option<Vec<Edit>> {
     todo!();
-}
-
-impl RGraph {
-    fn get_weight(&self, u: u32, v: u32) -> f32 {
-        if u < v {
-            self.w[&(u, v)]
-        } else if u > v {
-            self.w[&(v, u)]
-        } else {
-            panic!("Tried to get weight of a self-loop!");
-        }
-    }
-
-    fn set_weight(&mut self, u: u32, v: u32, weight: f32) {
-        if u < v {
-            self.w.insert((u, v), weight);
-        } else if u > v {
-            self.w.insert((v, u), weight);
-        } else {
-            panic!("Tried to set weight of a self-loop!");
-        }
-    }
 }
