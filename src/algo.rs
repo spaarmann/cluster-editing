@@ -1,4 +1,4 @@
-use crate::{Graph, PetGraph};
+use crate::{critical_cliques, graph::IndexMap, Graph, PetGraph};
 
 use std::collections::HashMap;
 
@@ -31,16 +31,20 @@ pub fn split_into_connected_components(g: &PetGraph) -> Vec<PetGraph> {
         .collect()
 }
 
-//#[derive(Copy, Clone, Debug)]
-//pub enum Edge {
-//    Original(u32, u32),
-//    Merged(u32),
-//}
-
 #[derive(Copy, Clone, Debug)]
 pub enum Edit {
-    Insert((usize, usize)),
-    Delete((usize, usize)),
+    Insert(usize, usize),
+    Delete(usize, usize),
+}
+
+impl Edit {
+    pub fn insert(imap: &IndexMap, u: usize, v: usize) -> Self {
+        Self::Insert(imap[u], imap[v])
+    }
+
+    pub fn delete(imap: &IndexMap, u: usize, v: usize) -> Self {
+        Self::Delete(imap[u], imap[v])
+    }
 }
 
 pub fn find_optimal_cluster_editing(g: &Graph) -> (i32, Vec<Edit>) {
@@ -56,6 +60,12 @@ pub fn find_optimal_cluster_editing(g: &Graph) -> (i32, Vec<Edit>) {
 
     loop {
         let g = g.clone();
+        // The imap is used to always have a mapping from the current indices used by the graph to
+        // what indices those vertices have in the original graph.
+        // The algorithm works on reduced/modified graphs in parts, but when editing those we want
+        // to create `Edit` values that are usable on the original graph; we can create those by
+        // using the imap.
+        let imap = IndexMap::identity(g.node_count());
 
         trace!("[driver] Starting search with k={}", k);
 
@@ -63,10 +73,7 @@ pub fn find_optimal_cluster_editing(g: &Graph) -> (i32, Vec<Edit>) {
             K_MAX = k;
         }
 
-        if let Some((g, edits)) = find_cluster_editing(g, Vec::new(), k) {
-            // TODO: Depending on what exactly we need to output, this might
-            // need to turn edits for merged vertices etc. back into the expected
-            // things.
+        if let Some((g, edits)) = find_cluster_editing(g, imap, Vec::new(), k) {
             return (k as i32, edits);
         }
 
@@ -81,9 +88,16 @@ static mut K_MAX: f32 = 0.0;
 /// was found.
 // `k` is stored as float because it needs to be compared with and changed by values from
 // the WeightMap a lot, which are floats.
-fn find_cluster_editing(mut g: Graph, mut edits: Vec<Edit>, k: f32) -> Option<(Graph, Vec<Edit>)> {
-    // TODO: Finish up the reduction (mainly merging vertices) and enable it.
-    //reduce(rg, &mut k);
+fn find_cluster_editing(
+    mut g: Graph,
+    mut imap: IndexMap,
+    mut edits: Vec<Edit>,
+    mut k: f32,
+) -> Option<(Graph, Vec<Edit>)> {
+    match reduce(&mut g, &mut imap, &mut k) {
+        None => return None,
+        Some(mut new_edits) => edits.append(&mut new_edits),
+    }
 
     // TODO: "If a connected component decomposes into two components, we calculate
     // the optimum solution for these components separately." Figure out the details
@@ -142,16 +156,17 @@ fn find_cluster_editing(mut g: Graph, mut edits: Vec<Edit>, k: f32) -> Option<(G
     {
         let mut g = g.clone();
         let mut edits = edits.clone();
+        let imap = imap.clone();
         let vw = g.get_mut(v, w);
         // TODO: Might not need this check after edge merging is in? Maybe?
         if vw.is_finite() {
             let k = k + *vw;
             let res = if k >= 0.0 {
                 *vw = f32::INFINITY;
-                edits.push(Edit::Insert((v, w)));
+                edits.push(Edit::insert(&imap, v, w));
                 g.set(u, w, f32::INFINITY);
                 g.set(u, v, f32::INFINITY);
-                find_cluster_editing(g, edits, k)
+                find_cluster_editing(g, imap, edits, k)
             } else {
                 None
             };
@@ -166,16 +181,17 @@ fn find_cluster_editing(mut g: Graph, mut edits: Vec<Edit>, k: f32) -> Option<(G
     {
         let mut g = g.clone();
         let mut edits = edits.clone();
+        let imap = imap.clone();
         let uv = g.get_mut(u, v);
         // TODO: Might not need this check after edge merging is in? Maybe?
         if uv.is_finite() {
             let k = k - *uv;
             let res = if k >= 0.0 {
                 *uv = f32::NEG_INFINITY;
-                edits.push(Edit::Delete((u, v)));
+                edits.push(Edit::delete(&imap, u, v));
                 g.set(u, w, f32::INFINITY);
                 g.set(v, w, f32::NEG_INFINITY);
-                find_cluster_editing(g, edits, k)
+                find_cluster_editing(g, imap, edits, k)
             } else {
                 None
             };
@@ -194,8 +210,8 @@ fn find_cluster_editing(mut g: Graph, mut edits: Vec<Edit>, k: f32) -> Option<(G
             let k = k - *uw;
             let res = if k >= 0.0 {
                 *uw = f32::NEG_INFINITY;
-                edits.push(Edit::Delete((u, w)));
-                find_cluster_editing(g, edits, k)
+                edits.push(Edit::delete(&imap, u, w));
+                find_cluster_editing(g, imap, edits, k)
             } else {
                 None
             };
@@ -212,6 +228,40 @@ fn find_cluster_editing(mut g: Graph, mut edits: Vec<Edit>, k: f32) -> Option<(G
 /// Reduces the problem instance. Modifies the mutable arguments directly to be a smaller
 /// instance. If this discovers the instance is not solvable at all, returns `None`. Otherwise
 /// returns the list of edits performed (which may be empty).
-fn reduce(g: &mut Graph, k: &mut f32) -> Option<Vec<Edit>> {
-    todo!();
+fn reduce(g: &mut Graph, imap: &mut IndexMap, k: &mut f32) -> Option<Vec<Edit>> {
+    let old_k = *k;
+
+    /*if unsafe { K_MAX == 3.0 } && old_k == 2.0 {
+        trace!(
+            "{} [k={}] Printing debug graph!",
+            "\t".repeat((unsafe { K_MAX - old_k.max(0.0) }) as usize),
+            old_k,
+        );
+        crate::graphviz::print_graph("debug-pre-reduce.png", &g.into_petgraph(None));
+    }*/
+
+    let edits = critical_cliques::apply_reductions(g, imap, k);
+
+    /*if unsafe { K_MAX == 3.0 } && old_k == 2.0 {
+        crate::graphviz::print_graph("debug-post-reduce.png", &g.into_petgraph(None));
+    }*/
+
+    if *k < 0.0 {
+        trace!(
+            "{} [k={}] Found 'no solution' from applying reductions, k now {}",
+            "\t".repeat((unsafe { K_MAX - old_k.max(0.0) }) as usize),
+            old_k,
+            k
+        );
+    } else if old_k > *k {
+        log::warn!(
+            "{} [k={}] Reduced instance from k={} to k={}",
+            "\t".repeat((unsafe { K_MAX - old_k.max(0.0) }) as usize),
+            old_k,
+            old_k,
+            k
+        );
+    }
+
+    edits
 }

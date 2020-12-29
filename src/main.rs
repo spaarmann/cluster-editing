@@ -69,10 +69,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         for edit in edits {
             match edit {
-                algo::Edit::Insert((u, v)) => {
+                algo::Edit::Insert(u, v) => {
                     result.add_edge(NodeIndex::new(imap[u]), NodeIndex::new(imap[v]), 0);
                 }
-                algo::Edit::Delete((u, v)) => {
+                algo::Edit::Delete(u, v) => {
                     result.remove_edge(
                         result
                             .find_edge(NodeIndex::new(imap[u]), NodeIndex::new(imap[v]))

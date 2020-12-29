@@ -207,6 +207,7 @@ impl std::ops::IndexMut<(usize, usize)> for Graph {
 /// This is fine (and even advantageous) for operating on a single `Graph` instance,
 /// but in some contexts it is necessary to e.g. map those indices to those of the original input
 /// graph. An `IndexMap` can store such a mapping.
+#[derive(Clone, Debug)]
 pub struct IndexMap {
     map: Vec<usize>,
 }
@@ -214,6 +215,12 @@ pub struct IndexMap {
 impl IndexMap {
     pub fn new(size: usize) -> Self {
         Self { map: vec![0; size] }
+    }
+
+    pub fn identity(size: usize) -> Self {
+        Self {
+            map: (0..size).collect(),
+        }
     }
 }
 
