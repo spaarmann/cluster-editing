@@ -1,4 +1,5 @@
 pub mod algo;
+pub mod critical_cliques;
 pub mod graphviz;
 pub mod parser;
 
