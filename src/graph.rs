@@ -65,10 +65,15 @@ impl Graph {
     }
 
     /// Creates a petgraph graph from this graph.
-    pub fn into_petgraph(&self) -> crate::PetGraph {
+    pub fn into_petgraph(&self, imap: Option<&IndexMap>) -> crate::PetGraph {
         use petgraph::prelude::NodeIndex;
 
         let mut pg = crate::PetGraph::with_capacity(self.size, 0);
+
+        for u in 0..self.size {
+            pg.add_node(imap.map(|m| m[u]).unwrap_or(u));
+        }
+
         for u in 0..self.size {
             for v in (u + 1)..self.size {
                 if self.get_direct(u, v) > 0.0 {

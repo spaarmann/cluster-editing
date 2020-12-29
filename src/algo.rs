@@ -146,7 +146,6 @@ fn find_cluster_editing(mut g: Graph, mut edits: Vec<Edit>, k: f32) -> Option<(G
         // TODO: Might not need this check after edge merging is in? Maybe?
         if vw.is_finite() {
             let k = k + *vw;
-            trace!("[1] Calc'd k = {}, from edge weight {}", k, *vw);
             let res = if k >= 0.0 {
                 *vw = f32::INFINITY;
                 edits.push(Edit::Insert((v, w)));
@@ -171,7 +170,6 @@ fn find_cluster_editing(mut g: Graph, mut edits: Vec<Edit>, k: f32) -> Option<(G
         // TODO: Might not need this check after edge merging is in? Maybe?
         if uv.is_finite() {
             let k = k - *uv;
-            trace!("[2] Calc'd k = {}, from edge weight {}", k, *uv);
             let res = if k >= 0.0 {
                 *uv = f32::NEG_INFINITY;
                 edits.push(Edit::Delete((u, v)));
@@ -194,7 +192,6 @@ fn find_cluster_editing(mut g: Graph, mut edits: Vec<Edit>, k: f32) -> Option<(G
         // TODO: Might not need this check after edge merging is in? Maybe?
         if uw.is_finite() {
             let k = k - *uw;
-            trace!("[3] Calc'd k = {}, from edge weight {}", k, *uw);
             let res = if k >= 0.0 {
                 *uw = f32::NEG_INFINITY;
                 edits.push(Edit::Delete((u, w)));
