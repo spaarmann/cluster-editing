@@ -24,27 +24,45 @@ pub fn find_optimal_cluster_editing(g: &Graph) -> (i32, Vec<Edit>) {
     // TODO: Not sure if executing the algo once with k = 0 is the best
     // way of handling already-disjoint-clique-components.
 
+    let original_node_count = g.node_count();
     info!(
         "Computing optimal solution for graph with {} nodes.",
-        g.node_count()
+        original_node_count
     );
 
     loop {
-        let g = g.clone();
+        let mut g = g.clone();
         // The imap is used to always have a mapping from the current indices used by the graph to
         // what indices those vertices have in the original graph.
         // The algorithm works on reduced/modified graphs in parts, but when editing those we want
         // to create `Edit` values that are usable on the original graph; we can create those by
         // using the imap.
-        let imap = IndexMap::identity(g.node_count());
+        let mut imap = IndexMap::identity(g.node_count());
 
-        info!("[driver] Starting search with k={}", k);
-
+        info!("[driver] Starting search with k={}, reducing now...", k);
         unsafe {
             K_MAX = k;
         }
 
-        if let Some((_, edits)) = find_cluster_editing(g, imap, Vec::new(), k) {
+        let mut reduced_k = k;
+        let edits;
+        match reduce(&mut g, &mut imap, &mut reduced_k) {
+            None => {
+                k += 1.0;
+                continue;
+            }
+            Some(reduce_edits) => edits = reduce_edits,
+        }
+
+        info!(
+            "[driver] Reduced problem with k={} to k={}, from n={} to n={}",
+            k,
+            reduced_k,
+            original_node_count,
+            g.node_count()
+        );
+
+        if let Some((_, edits)) = find_cluster_editing(g, imap, edits, reduced_k) {
             return (k as i32, edits);
         }
 
@@ -68,11 +86,6 @@ fn find_cluster_editing(
     // If k is already 0, we can only if we currently have a solution; there is no point in trying
     // to do further reductions or splitting as we can't afford any edits anyway.
     if k > 0.0 {
-        match reduce(&mut g, &mut imap, &mut k) {
-            None => return None,
-            Some(mut new_edits) => edits.append(&mut new_edits),
-        }
-
         let components = g.split_into_components(&imap);
         if components.len() > 1 {
             // If a connected component decomposes into two components, we calculate
@@ -245,14 +258,14 @@ fn reduce(g: &mut Graph, imap: &mut IndexMap, k: &mut f32) -> Option<Vec<Edit>> 
     }*/
 
     if *k < 0.0 {
-        log::warn!(
+        log::trace!(
             "{} [k={}] Found 'no solution' from applying reductions, k now {}",
             "\t".repeat((unsafe { K_MAX - old_k.max(0.0) }) as usize),
             old_k,
             k
         );
     } else if old_k > *k {
-        log::warn!(
+        log::trace!(
             "{} [k={}] Reduced instance from k={} to k={}",
             "\t".repeat((unsafe { K_MAX - old_k.max(0.0) }) as usize),
             old_k,

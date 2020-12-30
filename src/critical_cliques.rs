@@ -79,114 +79,261 @@ fn should_be_neighbors(g: &Graph, c1: &CritClique, c2: &CritClique) -> bool {
 
 // Chen and Meng: A 2k Kernel for the Cluster Editing Problem, 2010
 pub fn apply_reductions(g: &mut Graph, imap: &mut IndexMap, k: &mut f32) -> Option<Vec<Edit>> {
-    let crit = build_crit_clique_graph(g);
-
-    let mut removed_g = vec![false; g.node_count()];
     let mut edits = Vec::new();
 
-    //log::trace!("[reduce] graph before: {:?}", g);
+    let mut any_rules_applied = true;
+    while any_rules_applied {
+        any_rules_applied = false;
 
-    for (clique_idx, clique) in crit.cliques.iter().enumerate() {
-        let clique_neighbors = get_clique_neighborhood(clique_idx, &crit);
-        let edit_set = calculate_edits_to_remove_clique_and_neighborhood(
-            g,
-            imap,
-            &removed_g,
-            clique,
-            &clique_neighbors,
-        );
+        let mut rule5_state = None;
 
-        let clique_len = clique.vertices.len();
-        let neighbors_len = clique_neighbors.len();
-        let total_edit_degree = edit_set.total_edit_degree;
+        let crit = build_crit_clique_graph(g);
 
-        let rule1_applicable = clique_len as f32 > *k;
-        let rule2_applicable =
-            clique_len >= neighbors_len && clique_len + neighbors_len > total_edit_degree;
+        let mut removed_g = vec![false; g.node_count()];
 
-        if rule1_applicable || rule2_applicable {
+        //log::trace!("[reduce] graph before: {:?}", g);
+
+        for (clique_idx, clique) in crit.cliques.iter().enumerate() {
+            let (clique_neighbors, clique_crit_neighbor_count) =
+                get_clique_neighbors(clique_idx, &crit, &removed_g);
+            let edit_set = calculate_edits_to_remove_clique_and_neighborhood(
+                g,
+                &removed_g,
+                clique,
+                &clique_neighbors,
+            );
+
+            let clique_len = clique.vertices.len();
+            let neighbors_len = clique_neighbors.len();
+            let total_edit_degree = edit_set.total_edit_degree;
+
+            let rule1_applicable = clique_len as f32 > *k;
+            let rule2_applicable =
+                clique_len >= neighbors_len && clique_len + neighbors_len > total_edit_degree;
+
+            let mut rule3_applicable = false;
+            let mut rule4_applicable = false;
+            let mut rule4_vertex = None;
+            let mut clique_neighbors2 = None;
+            if !rule1_applicable && !rule2_applicable {
+                // Only calculate this if the other two aren't already true since it's a bit more work
+                if clique_len < neighbors_len && clique_len + neighbors_len > total_edit_degree {
+                    // TODO: If we keep applying removed_g every while iteration, these calls here
+                    // don't actually need to deal with it.
+
+                    let neighbors2 = get_clique_neighbors2(clique_idx, &crit, &removed_g);
+
+                    let threshold = (clique_len + neighbors_len) / 2;
+                    for &u in &neighbors2 {
+                        let count =
+                            count_intersection(g.neighbors(u), &clique_neighbors, &removed_g);
+                        if count > threshold {
+                            rule4_vertex = Some(u);
+                            break;
+                        }
+                    }
+
+                    if rule5_state.is_none() {
+                        rule5_state = Some((
+                            clique.clone(),
+                            clique_neighbors.clone(),
+                            clique_crit_neighbor_count,
+                            neighbors2.clone(),
+                        ));
+                    }
+
+                    rule3_applicable = rule4_vertex.is_none();
+                    rule4_applicable = rule4_vertex.is_some();
+                    clique_neighbors2 = Some(neighbors2);
+                }
+            }
+
             /*log::warn!(
-                "Applying reduction, applicability: [{}, {}], k before: {}",
+                "rule applicability: [{}, {}, {}, {}]",
                 rule1_applicable,
                 rule2_applicable,
-                *k
+                rule3_applicable,
+                rule4_applicable
             );*/
 
-            make_clique_and_neighborhood_disjoint_and_remove(
+            if rule1_applicable || rule2_applicable || rule3_applicable {
+                let has_reduced = make_clique_and_neighborhood_disjoint_and_remove(
+                    g,
+                    imap,
+                    k,
+                    &mut removed_g,
+                    &mut edits,
+                    edit_set,
+                    &clique,
+                    &clique_neighbors,
+                );
+
+                //log::warn!("k after: {}", *k);
+
+                if *k < 0.0 {
+                    return None;
+                }
+
+                if has_reduced {
+                    any_rules_applied = true;
+                    break;
+                }
+            }
+
+            if rule4_applicable {
+                // TODO: If we stop applying removed_g every `while` iteration, this needs to take
+                // it into account.
+                let has_reduced = apply_rule4(
+                    g,
+                    imap,
+                    k,
+                    &mut edits,
+                    &clique_neighbors,
+                    &clique_neighbors2.unwrap(),
+                    rule4_vertex.unwrap(),
+                );
+
+                if *k < 0.0 {
+                    return None;
+                }
+
+                if has_reduced {
+                    any_rules_applied = true;
+                    break;
+                }
+            }
+        }
+
+        if !any_rules_applied && rule5_state.is_some() {
+            // If we got here, either no rule was applicable or they did not result in any further
+            // reduction, but we found a case where rule 5 should now be applicable.
+            // The paper claims that the above condition and the fact that the other rules
+            // don#t reduce it further is sufficient to imply this condition. Let's check to be
+            // safe for now :)
+            // TODO: Might remove this check if I'm convinced it's safe.
+            let (clique, clique_neighbors, clique_crit_neighbor_count, clique_neighbors2) =
+                rule5_state.unwrap();
+            assert!(clique_crit_neighbor_count == 1 && clique_neighbors2.len() == 1);
+            log::error!("Applying rule 5");
+            let has_reduced = apply_rule5(
                 g,
                 imap,
                 k,
                 &mut removed_g,
                 &mut edits,
-                edit_set,
                 &clique,
                 &clique_neighbors,
             );
 
-            //log::warn!("k after: {}", *k);
-
-            if *k < 0.0 {
-                return None;
+            if !has_reduced {
+                // All the other rules didn't apply, so we got here, and now 5 didn't do anything
+                // either. We're done now.
+                break;
             }
-
-            continue;
+            any_rules_applied = true;
         }
-    }
 
-    //log::trace!("[reduce] graph after: {:?}", g);
+        //log::trace!("[reduce] graph after: {:?}", g);
 
-    let removed_count = removed_g.iter().filter(|&&b| b).count();
+        let removed_count = removed_g.iter().filter(|&&b| b).count();
 
-    if removed_count == 0 {
-        return Some(edits);
-    }
-
-    // Construct a new graph and imap with the vertices we marked for removal actually removed. The
-    // new imap still maps from indices into that new graph to the vertices of the original graph
-    // the algorithm got as input.
-
-    // TODO: Possibly test whether it's faster to just keep the removed_g map around in a larger
-    // scope rather than creating the graph here.
-
-    let mut new_g = Graph::new(g.node_count() - removed_count);
-    let mut new_imap = IndexMap::new(new_g.node_count());
-    let mut new_vertex = 0;
-
-    let mut reverse_imap = IndexMap::new(g.node_count());
-
-    for u in 0..g.node_count() {
-        if removed_g[u] {
+        if removed_count == 0 {
             continue;
         }
 
-        for v in g.neighbors(u) {
-            if v > u || removed_g[v] {
+        // Construct a new graph and imap with the vertices we marked for removal actually removed. The
+        // new imap still maps from indices into that new graph to the vertices of the original graph
+        // the algorithm got as input.
+
+        // TODO: Figure out if it's necessary to do this every `while` iteration or if the
+        // reductions are all still valid without it; would also be nice to avoid recomputing the
+        // crit clique graph when it's not necessary.
+
+        // TODO: Possibly test whether it's faster to just keep the removed_g map around in a larger
+        // scope rather than creating the graph here.
+
+        let mut new_g = Graph::new(g.node_count() - removed_count);
+        let mut new_imap = IndexMap::new(new_g.node_count());
+        let mut new_vertex = 0;
+
+        let mut reverse_imap = IndexMap::new(g.node_count());
+
+        for u in 0..g.node_count() {
+            if removed_g[u] {
                 continue;
             }
 
-            new_g.set_direct(reverse_imap[v], new_vertex, g.get_direct(v, u));
+            for v in g.neighbors(u) {
+                if v > u || removed_g[v] {
+                    continue;
+                }
+
+                new_g.set_direct(reverse_imap[v], new_vertex, g.get_direct(v, u));
+            }
+
+            reverse_imap[u] = new_vertex;
+            new_imap[new_vertex] = imap[u];
+            new_vertex += 1;
         }
 
-        reverse_imap[u] = new_vertex;
-        new_imap[new_vertex] = imap[u];
-        new_vertex += 1;
+        *g = new_g;
+        *imap = new_imap;
     }
-
-    *g = new_g;
-    *imap = new_imap;
 
     Some(edits)
 }
 
+// TODO: COOOOMMMEEEENNNNTTTTSSSS!!!!
+
 /// Gets all the vertices that are neighbors of the critical clique, but not in the clique
 /// themselves. No specific order is guaranteed.
-fn get_clique_neighborhood(clique_idx: usize, crit_graph: &CritCliqueGraph) -> Vec<usize> {
-    crit_graph
-        .graph
-        .neighbors(clique_idx)
-        .flat_map(|n| &crit_graph.cliques[n].vertices)
+fn get_clique_neighbors(
+    clique_idx: usize,
+    crit_graph: &CritCliqueGraph,
+    removed_g: &[bool],
+) -> (Vec<usize>, usize) {
+    let crit_neighbors = crit_graph.graph.neighbors(clique_idx);
+    let mut count = 0;
+    let neighborhood = crit_neighbors
+        .flat_map(|n| {
+            count += 1;
+            &crit_graph.cliques[n].vertices
+        })
         .copied()
+        .filter(|&u| !removed_g[u])
+        .collect();
+    (neighborhood, count)
+}
+
+fn get_clique_neighbors2(
+    clique_idx: usize,
+    crit_graph: &CritCliqueGraph,
+    removed_g: &[bool],
+) -> Vec<usize> {
+    let crit_neighbors = crit_graph.graph.neighbors(clique_idx).collect::<Vec<_>>();
+
+    crit_neighbors
+        .iter()
+        .flat_map(|&n| {
+            crit_graph
+                .graph
+                .neighbors(n)
+                .filter(|n2| !crit_neighbors.contains(n2))
+                .flat_map(|n2| &crit_graph.cliques[n2].vertices)
+        })
+        .copied()
+        .filter(|&u| !removed_g[u])
         .collect()
+}
+
+fn count_intersection(n1: impl Iterator<Item = usize>, n2: &[usize], removed_g: &[bool]) -> usize {
+    let mut count = 0;
+    for u in n1 {
+        if !removed_g[u] && n2.contains(&u) {
+            count += 1;
+        }
+    }
+    count
 }
 
 struct EditSet {
@@ -197,7 +344,6 @@ struct EditSet {
 
 fn calculate_edits_to_remove_clique_and_neighborhood(
     g: &Graph,
-    imap: &IndexMap,
     removed_g: &[bool],
     clique: &CritClique,
     clique_neighbors: &[usize],
@@ -274,23 +420,19 @@ fn make_clique_and_neighborhood_disjoint_and_remove(
     edits_to_perform: EditSet,
     clique: &CritClique,
     clique_neighbors: &[usize],
-) {
+) -> bool {
     for (u, v) in edits_to_perform.inserts {
         let uv = g.get_mut(u, v);
-        if *uv < 0.0 {
-            *k += *uv;
-            edits.push(Edit::insert(&imap, u, v));
-            *uv = f32::INFINITY;
-        }
+        *k += *uv;
+        edits.push(Edit::insert(&imap, u, v));
+        *uv = f32::INFINITY;
     }
 
     for (u, v) in edits_to_perform.deletions {
         let uv = g.get_mut(u, v);
-        if *uv > 0.0 {
-            *k -= *uv;
-            edits.push(Edit::delete(&imap, u, v));
-            *uv = f32::NEG_INFINITY;
-        }
+        *k -= *uv;
+        edits.push(Edit::delete(&imap, u, v));
+        *uv = f32::NEG_INFINITY;
     }
 
     // Now mark the clique and its neighbors as "removed" from the graph, so future reduction and
@@ -301,6 +443,103 @@ fn make_clique_and_neighborhood_disjoint_and_remove(
     for &u in &clique.vertices {
         removed_g[u] = true;
     }
+
+    clique_neighbors.len() > 0 || clique.vertices.len() > 0
+}
+
+fn apply_rule4(
+    g: &mut Graph,
+    imap: &IndexMap,
+    k: &mut f32,
+    edits: &mut Vec<Edit>,
+    clique_neighbors: &[usize],
+    clique_neighbors2: &[usize],
+    u: usize,
+) -> bool {
+    // Insert edges in neighborhood to make clique+neighborhood a clique.
+    let mut has_done_edit = false;
+
+    for i in 0..clique_neighbors.len() {
+        let v = clique_neighbors[i];
+
+        // Add edges to other clique neighbors.
+        for j in (i + 1)..clique_neighbors.len() {
+            let w = clique_neighbors[j];
+
+            let vw = g.get_mut(v, w);
+            if *vw < 0.0 {
+                *k += *vw;
+                edits.push(Edit::insert(&imap, v, w));
+                *vw = f32::INFINITY;
+
+                has_done_edit = true;
+            }
+        }
+    }
+
+    // Remove edges between clique_neighbors and clique_neighbors2-u
+    for &v in clique_neighbors {
+        for &w in clique_neighbors2 {
+            if w == u {
+                continue;
+            }
+
+            let vw = g.get_mut(v, w);
+            if *vw > 0.0 {
+                *k -= *vw;
+                edits.push(Edit::delete(&imap, v, w));
+                *vw = f32::NEG_INFINITY;
+
+                has_done_edit = true;
+            }
+        }
+    }
+
+    has_done_edit
+}
+
+fn apply_rule5(
+    g: &mut Graph,
+    imap: &IndexMap,
+    k: &mut f32,
+    removed_g: &mut [bool],
+    edits: &mut Vec<Edit>,
+    clique: &CritClique,
+    clique_neighbors: &[usize],
+) -> bool {
+    // Can pick any set of |clique| vertices in clique_neighbors, we'll just use the first |clique|
+    // verts.
+    // Then, remove (clique + that set) from G, and set k = k - |clique|.
+    // Note that the modification to k does not actually correspond directly to the edge edits we
+    // do, but this is what the paper has proven to be correct *shrug*.
+
+    let clique_size = clique.vertices.len();
+    let to_remove = clique
+        .vertices
+        .iter()
+        .chain(clique_neighbors[..clique_size].iter())
+        .copied()
+        .collect::<Vec<_>>();
+
+    for &u in &to_remove {
+        removed_g[u] = true;
+
+        for v in 0..g.node_count() {
+            if removed_g[v] {
+                continue;
+            }
+
+            let uv = g.get_mut(u, v);
+            if *uv > 0.0 {
+                edits.push(Edit::delete(imap, u, v));
+                *uv = f32::NEG_INFINITY;
+            }
+        }
+    }
+
+    *k = *k - clique_size as f32;
+
+    to_remove.len() > 0
 }
 
 #[cfg(test)]
