@@ -88,26 +88,49 @@ pub fn apply_reductions(g: &mut Graph, imap: &mut IndexMap, k: &mut f32) -> Opti
 
     for (clique_idx, clique) in crit.cliques.iter().enumerate() {
         let clique_neighbors = get_clique_neighborhood(clique_idx, &crit);
+        let edit_set = calculate_edits_to_remove_clique_and_neighborhood(
+            g,
+            imap,
+            &removed_g,
+            clique,
+            &clique_neighbors,
+        );
 
-        // Rule 1
-        if clique.vertices.len() as f32 > *k {
+        let clique_len = clique.vertices.len();
+        let neighbors_len = clique_neighbors.len();
+        let total_edit_degree = edit_set.total_edit_degree;
+
+        let rule1_applicable = clique_len as f32 > *k;
+        let rule2_applicable =
+            clique_len >= neighbors_len && clique_len + neighbors_len > total_edit_degree;
+
+        if rule1_applicable || rule2_applicable {
+            /*log::warn!(
+                "Applying reduction, applicability: [{}, {}], k before: {}",
+                rule1_applicable,
+                rule2_applicable,
+                *k
+            );*/
+
             make_clique_and_neighborhood_disjoint_and_remove(
                 g,
                 imap,
                 k,
                 &mut removed_g,
                 &mut edits,
+                edit_set,
                 &clique,
                 &clique_neighbors,
             );
 
+            //log::warn!("k after: {}", *k);
+
             if *k < 0.0 {
                 return None;
             }
-        }
 
-        // Rule 2
-        //if clique.vertices.len() >= |N(K)|
+            continue;
+        }
     }
 
     //log::trace!("[reduce] graph after: {:?}", g);
@@ -166,29 +189,19 @@ fn get_clique_neighborhood(clique_idx: usize, crit_graph: &CritCliqueGraph) -> V
         .collect()
 }
 
-/// This (somewhat awkwardly named) function will make clique + N(clique) a disjoint clique in g by
-/// performing appropriate edge edits, mark those vertices as removed, adjust k accordingly, and
-/// store the set of edits made.
-fn make_clique_and_neighborhood_disjoint_and_remove(
-    g: &mut Graph,
-    imap: &mut IndexMap,
-    k: &mut f32,
-    removed_g: &mut Vec<bool>,
-    edits: &mut Vec<Edit>,
+struct EditSet {
+    inserts: Vec<(usize, usize)>,
+    deletions: Vec<(usize, usize)>,
+    total_edit_degree: usize,
+}
+
+fn calculate_edits_to_remove_clique_and_neighborhood(
+    g: &Graph,
+    imap: &IndexMap,
+    removed_g: &[bool],
     clique: &CritClique,
     clique_neighbors: &[usize],
-) {
-    // Contains the critical clique and all vertices neighboring the clique.
-    let vertices = g
-        .closed_neighbors(*clique.vertices.first().unwrap())
-        .collect::<Vec<_>>();
-
-    /*log::trace!(
-        "[reduce] isolating {:?} based on clique {:?}",
-        vertices,
-        clique.vertices
-    );*/
-
+) -> EditSet {
     // Everything in the clique is already connected with the rest of the clique (it's a clique!).
     // All the neighbors are also connected to all the vertices in the clique, because all the
     // clique vertices have the *same set* of neighbors outside the clique (it's a *critical*
@@ -198,6 +211,13 @@ fn make_clique_and_neighborhood_disjoint_and_remove(
     // The only edges that we need to remove are between the neighbors of the clique to any nodes
     // that are neither in the neighbors nor the clique itself. (The vertices in the clique
     // obviously don't have any such neighbors, so there's nothing to remove.)
+
+    let mut edits = EditSet {
+        inserts: Vec::new(),
+        deletions: Vec::new(),
+        total_edit_degree: 0,
+    };
+
     for i in 0..clique_neighbors.len() {
         let u = clique_neighbors[i];
         if removed_g[u] {
@@ -211,11 +231,12 @@ fn make_clique_and_neighborhood_disjoint_and_remove(
                 continue;
             }
 
-            let uv = g.get_mut(u, v);
-            if *uv < 0.0 {
-                *k += *uv;
-                edits.push(Edit::insert(&imap, u, v));
-                *uv = f32::INFINITY;
+            if g.get(u, v) < 0.0 {
+                edits.inserts.push((u, v));
+
+                // Increase total degree twice: we only add the (u, v) edge once but it would be
+                // counted in the edit degree for both u and v
+                edits.total_edit_degree += 2;
             }
         }
 
@@ -231,12 +252,44 @@ fn make_clique_and_neighborhood_disjoint_and_remove(
                 continue;
             }
 
-            let uv = g.get_mut(u, v);
-            if *uv > 0.0 {
-                *k -= *uv;
-                edits.push(Edit::delete(&imap, u, v));
-                *uv = f32::NEG_INFINITY;
+            if g.get(u, v) > 0.0 {
+                edits.deletions.push((u, v));
+
+                // Here the degree is only increased once: it would only count for u, since v isn't
+                // even in the neighborhood and thus not considered.
+                edits.total_edit_degree += 1;
             }
+        }
+    }
+
+    edits
+}
+
+fn make_clique_and_neighborhood_disjoint_and_remove(
+    g: &mut Graph,
+    imap: &IndexMap,
+    k: &mut f32,
+    removed_g: &mut [bool],
+    edits: &mut Vec<Edit>,
+    edits_to_perform: EditSet,
+    clique: &CritClique,
+    clique_neighbors: &[usize],
+) {
+    for (u, v) in edits_to_perform.inserts {
+        let uv = g.get_mut(u, v);
+        if *uv < 0.0 {
+            *k += *uv;
+            edits.push(Edit::insert(&imap, u, v));
+            *uv = f32::INFINITY;
+        }
+    }
+
+    for (u, v) in edits_to_perform.deletions {
+        let uv = g.get_mut(u, v);
+        if *uv > 0.0 {
+            *k -= *uv;
+            edits.push(Edit::delete(&imap, u, v));
+            *uv = f32::NEG_INFINITY;
         }
     }
 

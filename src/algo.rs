@@ -1,35 +1,6 @@
-use crate::{critical_cliques, graph::IndexMap, Graph, PetGraph};
-
-use std::collections::HashMap;
+use crate::{critical_cliques, graph::IndexMap, Graph};
 
 use log::{info, trace};
-use petgraph::visit::EdgeRef;
-
-pub fn split_into_connected_components(g: &PetGraph) -> Vec<PetGraph> {
-    let ccs = petgraph::algo::tarjan_scc(g);
-
-    ccs.into_iter()
-        .map(|cc| {
-            let mut component = PetGraph::with_capacity(cc.len(), cc.len());
-            let mut index_map = HashMap::with_capacity(cc.len());
-            for v in cc {
-                let new_idx = component.add_node(g[v]);
-                index_map.insert(v, new_idx);
-
-                for e in g.edges(v) {
-                    let src = e.source();
-                    let tgt = e.target();
-
-                    if index_map.contains_key(&src) && index_map.contains_key(&tgt) {
-                        component.add_edge(index_map[&src], index_map[&tgt], *e.weight());
-                    }
-                }
-            }
-
-            component
-        })
-        .collect()
-}
 
 #[derive(Copy, Clone, Debug)]
 pub enum Edit {
@@ -73,7 +44,7 @@ pub fn find_optimal_cluster_editing(g: &Graph) -> (i32, Vec<Edit>) {
             K_MAX = k;
         }
 
-        if let Some((g, edits)) = find_cluster_editing(g, imap, Vec::new(), k) {
+        if let Some((_, edits)) = find_cluster_editing(g, imap, Vec::new(), k) {
             return (k as i32, edits);
         }
 
@@ -84,8 +55,8 @@ pub fn find_optimal_cluster_editing(g: &Graph) -> (i32, Vec<Edit>) {
 static mut K_MAX: f32 = 0.0;
 
 /// Tries to find a solution of size <= k for the problem instance in `rg`.
-/// Returns `None` if none can be found, or the set of edits made if a solution
-/// was found.
+/// Returns `None` if none can be found, or the set of edits made and the available cost remaining
+/// if a solution was found.
 // `k` is stored as float because it needs to be compared with and changed by values from
 // the WeightMap a lot, which are floats.
 fn find_cluster_editing(
@@ -93,15 +64,32 @@ fn find_cluster_editing(
     mut imap: IndexMap,
     mut edits: Vec<Edit>,
     mut k: f32,
-) -> Option<(Graph, Vec<Edit>)> {
-    match reduce(&mut g, &mut imap, &mut k) {
-        None => return None,
-        Some(mut new_edits) => edits.append(&mut new_edits),
-    }
+) -> Option<(f32, Vec<Edit>)> {
+    // If k is already 0, we can only if we currently have a solution; there is no point in trying
+    // to do further reductions or splitting as we can't afford any edits anyway.
+    if k > 0.0 {
+        match reduce(&mut g, &mut imap, &mut k) {
+            None => return None,
+            Some(mut new_edits) => edits.append(&mut new_edits),
+        }
 
-    // TODO: "If a connected component decomposes into two components, we calculate
-    // the optimum solution for these components separately." Figure out the details
-    // of what this means and how to do it efficiently.
+        let components = g.split_into_components(&imap);
+        if components.len() > 1 {
+            // If a connected component decomposes into two components, we calculate
+            // the optimum solution for these components separately.
+            // TODO: Still not entirely convinced why this is actually *correct*.
+
+            for (comp, comp_imap) in components {
+                // returns early if we can't even find a solution for the component,
+                // otherwise take the remaining k and proceed to the next component.
+                let comp_res = find_cluster_editing(comp, comp_imap, edits, k)?;
+                k = comp_res.0;
+                edits = comp_res.1;
+            }
+
+            return Some((k, edits));
+        }
+    }
 
     trace!(
         "{} [k={}] Searching triple",
@@ -139,7 +127,7 @@ fn find_cluster_editing(
     let (v, u, w) = match triple {
         None => {
             // No more conflict triples, this graph is solved!
-            return Some((g, edits));
+            return Some((k, edits));
         }
         Some(t) => t,
     };
@@ -152,8 +140,12 @@ fn find_cluster_editing(
 
     // Found a conflict triple, now branch into 3 cases:
 
+    // TODO: We now check all 3 branches, even if an earlier one has found a solution and take the
+    // most optimal solution, because otherwise it seems like the component handling above is
+    // incorrect?
+
     // 1. Insert vw, set uv, uw, vw to permanent
-    {
+    let best = {
         let mut g = g.clone();
         let mut edits = edits.clone();
         let imap = imap.clone();
@@ -161,7 +153,7 @@ fn find_cluster_editing(
         // TODO: Might not need this check after edge merging is in? Maybe?
         if vw.is_finite() {
             let k = k + *vw;
-            let res = if k >= 0.0 {
+            if k >= 0.0 {
                 *vw = f32::INFINITY;
                 edits.push(Edit::insert(&imap, v, w));
                 g.set(u, w, f32::INFINITY);
@@ -169,16 +161,14 @@ fn find_cluster_editing(
                 find_cluster_editing(g, imap, edits, k)
             } else {
                 None
-            };
-
-            if res.is_some() {
-                return res;
             }
+        } else {
+            None
         }
-    }
+    };
 
     // 2. Delete uv, set uw to permanent, and set uv and vw to forbidden
-    {
+    let res2 = {
         let mut g = g.clone();
         let mut edits = edits.clone();
         let imap = imap.clone();
@@ -186,7 +176,7 @@ fn find_cluster_editing(
         // TODO: Might not need this check after edge merging is in? Maybe?
         if uv.is_finite() {
             let k = k - *uv;
-            let res = if k >= 0.0 {
+            if k >= 0.0 {
                 *uv = f32::NEG_INFINITY;
                 edits.push(Edit::delete(&imap, u, v));
                 g.set(u, w, f32::INFINITY);
@@ -194,35 +184,43 @@ fn find_cluster_editing(
                 find_cluster_editing(g, imap, edits, k)
             } else {
                 None
-            };
-
-            if res.is_some() {
-                return res;
             }
+        } else {
+            None
         }
-    }
+    };
+
+    let best = match (best, res2) {
+        (None, r) => r,
+        (r, None) => r,
+        (Some((k1, e1)), Some((k2, e2))) => Some(if k1 > k2 { (k1, e1) } else { (k2, e2) }),
+    };
 
     // 3. Delete uw, set uw to forbidden
-    {
+    let res3 = {
         let uw = g.get_mut(u, w);
         // TODO: Might not need this check after edge merging is in? Maybe?
         if uw.is_finite() {
             let k = k - *uw;
-            let res = if k >= 0.0 {
+            if k >= 0.0 {
                 *uw = f32::NEG_INFINITY;
                 edits.push(Edit::delete(&imap, u, w));
                 find_cluster_editing(g, imap, edits, k)
             } else {
                 None
-            };
-
-            if res.is_some() {
-                return res;
             }
+        } else {
+            None
         }
-    }
+    };
 
-    None
+    let best = match (best, res3) {
+        (None, r) => r,
+        (r, None) => r,
+        (Some((k1, e1)), Some((k2, e2))) => Some(if k1 > k2 { (k1, e1) } else { (k2, e2) }),
+    };
+
+    best
 }
 
 /// Reduces the problem instance. Modifies the mutable arguments directly to be a smaller
@@ -247,7 +245,7 @@ fn reduce(g: &mut Graph, imap: &mut IndexMap, k: &mut f32) -> Option<Vec<Edit>> 
     }*/
 
     if *k < 0.0 {
-        trace!(
+        log::warn!(
             "{} [k={}] Found 'no solution' from applying reductions, k now {}",
             "\t".repeat((unsafe { K_MAX - old_k.max(0.0) }) as usize),
             old_k,

@@ -49,18 +49,19 @@ fn main() -> Result<(), Box<dyn Error>> {
         graphviz::print_graph(path, &graph);
     }
 
-    let components = algo::split_into_connected_components(&graph);
+    let mut result = graph.clone();
+
+    let (graph, imap) = Graph::new_from_petgraph(&graph);
+    let components = graph.split_into_components(&imap);
 
     info!(
         "Decomposed input graph into {} components",
         components.len()
     );
 
-    let mut result = graph.clone();
-
     for (i, c) in components.into_iter().enumerate() {
         info!("Solving component {}...", i);
-        let (cg, imap) = Graph::new_from_petgraph(&c);
+        let (cg, imap) = c;
         let (k, edits) = algo::find_optimal_cluster_editing(&cg);
         info!(
             "Found a cluster editing of {} edits for component {}: {:?}",

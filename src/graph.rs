@@ -184,6 +184,57 @@ impl Graph {
     pub fn has_edge_direct(&self, u: usize, v: usize) -> bool {
         self.get_direct(u, v) > 0.0
     }
+
+    /// Splits a graph into its connected components.
+    /// An associated index map is also split into equivalent maps for each individual component.
+    pub fn split_into_components(&self, imap: &IndexMap) -> Vec<(Self, IndexMap)> {
+        let mut visited = vec![false; self.size];
+        let mut stack = Vec::new();
+        let mut components = Vec::new();
+
+        let mut current = Vec::new();
+
+        for u in 0..self.size {
+            if visited[u] {
+                continue;
+            }
+
+            stack.push(u);
+
+            while let Some(v) = stack.pop() {
+                if visited[v] {
+                    continue;
+                }
+
+                visited[v] = true;
+                current.push(v);
+
+                for n in self.neighbors(v) {
+                    if !visited[n] {
+                        stack.push(n);
+                    }
+                }
+            }
+
+            let mut comp = Self::new(current.len());
+            let mut comp_imap = IndexMap::new(current.len());
+            for i in 0..current.len() {
+                let v = current[i];
+                comp_imap[i] = imap[v];
+
+                for j in 0..i {
+                    let w = current[j];
+
+                    comp.set(i, j, self.get(v, w));
+                }
+            }
+
+            components.push((comp, comp_imap));
+            current.clear();
+        }
+
+        components
+    }
 }
 
 impl std::ops::Index<(usize, usize)> for Graph {
