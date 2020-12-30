@@ -67,7 +67,7 @@ pub fn find_optimal_cluster_editing(g: &Graph) -> (i32, Vec<Edit>) {
         // using the imap.
         let imap = IndexMap::identity(g.node_count());
 
-        trace!("[driver] Starting search with k={}", k);
+        info!("[driver] Starting search with k={}", k);
 
         unsafe {
             K_MAX = k;

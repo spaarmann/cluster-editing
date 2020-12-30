@@ -86,7 +86,9 @@ pub fn apply_reductions(g: &mut Graph, imap: &mut IndexMap, k: &mut f32) -> Opti
 
     //log::trace!("[reduce] graph before: {:?}", g);
 
-    for clique in crit.cliques {
+    for (clique_idx, clique) in crit.cliques.iter().enumerate() {
+        let clique_neighbors = get_clique_neighborhood(clique_idx, &crit);
+
         // Rule 1
         if clique.vertices.len() as f32 > *k {
             make_clique_and_neighborhood_disjoint_and_remove(
@@ -96,6 +98,7 @@ pub fn apply_reductions(g: &mut Graph, imap: &mut IndexMap, k: &mut f32) -> Opti
                 &mut removed_g,
                 &mut edits,
                 &clique,
+                &clique_neighbors,
             );
 
             if *k < 0.0 {
@@ -152,6 +155,17 @@ pub fn apply_reductions(g: &mut Graph, imap: &mut IndexMap, k: &mut f32) -> Opti
     Some(edits)
 }
 
+/// Gets all the vertices that are neighbors of the critical clique, but not in the clique
+/// themselves. No specific order is guaranteed.
+fn get_clique_neighborhood(clique_idx: usize, crit_graph: &CritCliqueGraph) -> Vec<usize> {
+    crit_graph
+        .graph
+        .neighbors(clique_idx)
+        .flat_map(|n| &crit_graph.cliques[n].vertices)
+        .copied()
+        .collect()
+}
+
 /// This (somewhat awkwardly named) function will make clique + N(clique) a disjoint clique in g by
 /// performing appropriate edge edits, mark those vertices as removed, adjust k accordingly, and
 /// store the set of edits made.
@@ -162,6 +176,7 @@ fn make_clique_and_neighborhood_disjoint_and_remove(
     removed_g: &mut Vec<bool>,
     edits: &mut Vec<Edit>,
     clique: &CritClique,
+    clique_neighbors: &[usize],
 ) {
     // Contains the critical clique and all vertices neighboring the clique.
     let vertices = g
@@ -174,23 +189,29 @@ fn make_clique_and_neighborhood_disjoint_and_remove(
         clique.vertices
     );*/
 
-    for i in 0..vertices.len() {
-        let u = vertices[i];
-
-        // Skip vertices that were already "removed" by earlier reduction steps.
+    // Everything in the clique is already connected with the rest of the clique (it's a clique!).
+    // All the neighbors are also connected to all the vertices in the clique, because all the
+    // clique vertices have the *same set* of neighbors outside the clique (it's a *critical*
+    // clique!).
+    // So we only need to add edges between the different groups of neighbors.
+    //
+    // The only edges that we need to remove are between the neighbors of the clique to any nodes
+    // that are neither in the neighbors nor the clique itself. (The vertices in the clique
+    // obviously don't have any such neighbors, so there's nothing to remove.)
+    for i in 0..clique_neighbors.len() {
+        let u = clique_neighbors[i];
         if removed_g[u] {
             continue;
         }
 
-        // Make sure u is connected to every other vertex in vertices,
-        for j in (i + 1)..vertices.len() {
-            let v = vertices[j];
-            if removed_g[u] {
+        // Add edges to other clique neighbors.
+        for j in (i + 1)..clique_neighbors.len() {
+            let v = clique_neighbors[j];
+            if removed_g[v] {
                 continue;
             }
 
-            let uv = g.get_mut_direct(u, v);
-
+            let uv = g.get_mut(u, v);
             if *uv < 0.0 {
                 *k += *uv;
                 edits.push(Edit::insert(&imap, u, v));
@@ -198,28 +219,33 @@ fn make_clique_and_neighborhood_disjoint_and_remove(
             }
         }
 
-        // ... but not to anything else. (We want to transform vertices into a disjoint clique!)
+        // Remove edges to unrelated vertices.
+        // TODO: Try using a BTreeSet for neighbors and vertices, or using some kind of other iteration
+        // strategy to avoid the linear search here.
         for v in 0..g.node_count() {
-            if removed_g[v] {
+            if u == v || removed_g[v] {
                 continue;
             }
 
-            // TODO: Try using a BTreeSet for vertices, or using some kind of other iteration
-            // strategy to avoid the linear search here.
-            if vertices.contains(&v) {
+            if clique_neighbors.contains(&v) || clique.vertices.contains(&v) {
                 continue;
             }
 
             let uv = g.get_mut(u, v);
             if *uv > 0.0 {
                 *k -= *uv;
-                //log::trace!("[reduce] deleting {}-{} which has weight {}", u, v, *uv);
                 edits.push(Edit::delete(&imap, u, v));
                 *uv = f32::NEG_INFINITY;
             }
         }
+    }
 
-        // And at the end, all of the disjoint clique should just be removed from the graph.
+    // Now mark the clique and its neighbors as "removed" from the graph, so future reduction and
+    // algorithm steps ignore it. (It is now a disjoint clique, i.e. already done.)
+    for &u in clique_neighbors {
+        removed_g[u] = true;
+    }
+    for &u in &clique.vertices {
         removed_g[u] = true;
     }
 }
