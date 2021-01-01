@@ -11,6 +11,35 @@ pub struct CritCliqueGraph {
     pub graph: Graph,
 }
 
+impl CritCliqueGraph {
+    pub fn into_petgraph(&self) -> petgraph::Graph<String, u8, petgraph::Undirected, u32> {
+        use petgraph::prelude::NodeIndex;
+
+        let mut pg = petgraph::Graph::with_capacity(self.graph.node_count(), 0);
+
+        for u in 0..self.graph.node_count() {
+            pg.add_node(
+                self.cliques[u]
+                    .vertices
+                    .iter()
+                    .map(|i| i.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            );
+        }
+
+        for u in 0..self.graph.node_count() {
+            for v in (u + 1)..self.graph.node_count() {
+                if self.graph.get_direct(u, v) > 0.0 {
+                    pg.add_edge(NodeIndex::new(u), NodeIndex::new(v), 0);
+                }
+            }
+        }
+
+        pg
+    }
+}
+
 pub fn build_crit_clique_graph(g: &Graph) -> CritCliqueGraph {
     let mut cliques = Vec::new();
 

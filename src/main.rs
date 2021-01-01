@@ -31,6 +31,11 @@ struct Opt {
     /// Requires a working graphviz installation accessible in the path.
     #[structopt(short = "o", long = "print-output", parse(from_os_str))]
     print_output: Option<PathBuf>,
+
+    /// Print the critical clique graph associated with the input graph, as a PNG file.
+    /// Requires a working graphviz installation accessible in the path.
+    #[structopt(long = "print-cliques", parse(from_os_str))]
+    print_cliques: Option<PathBuf>,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -52,6 +57,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut result = graph.clone();
 
     let (graph, imap) = Graph::new_from_petgraph(&graph);
+
+    if let Some(path) = opt.print_cliques {
+        let crit_graph = cluster_editing::critical_cliques::build_crit_clique_graph(&graph);
+        graphviz::print_graph(path, &crit_graph.into_petgraph());
+    }
+
     let components = graph.split_into_components(&imap);
 
     info!(
