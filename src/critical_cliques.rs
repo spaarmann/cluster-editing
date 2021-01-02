@@ -15,9 +15,9 @@ impl CritCliqueGraph {
     pub fn into_petgraph(&self) -> petgraph::Graph<String, u8, petgraph::Undirected, u32> {
         use petgraph::prelude::NodeIndex;
 
-        let mut pg = petgraph::Graph::with_capacity(self.graph.node_count(), 0);
+        let mut pg = petgraph::Graph::with_capacity(self.graph.size(), 0);
 
-        for u in 0..self.graph.node_count() {
+        for u in 0..self.graph.size() {
             pg.add_node(
                 self.cliques[u]
                     .vertices
@@ -28,8 +28,8 @@ impl CritCliqueGraph {
             );
         }
 
-        for u in 0..self.graph.node_count() {
-            for v in (u + 1)..self.graph.node_count() {
+        for u in 0..self.graph.size() {
+            for v in (u + 1)..self.graph.size() {
                 if self.graph.get_direct(u, v) > 0.0 {
                     pg.add_edge(NodeIndex::new(u), NodeIndex::new(v), 0);
                 }
@@ -46,7 +46,7 @@ pub fn build_crit_clique_graph(g: &Graph) -> CritCliqueGraph {
     // TODO: This looks at least O(n^2) but should apparently be do-able in O(n + m), so have
     // another look at making this more efficient.
 
-    let mut visited = vec![false; g.node_count()];
+    let mut visited = vec![false; g.size()];
 
     for u in g.nodes() {
         if visited[u] {
@@ -118,19 +118,13 @@ pub fn apply_reductions(g: &mut Graph, imap: &mut IndexMap, k: &mut f32) -> Opti
 
         let crit = build_crit_clique_graph(g);
 
-        let mut removed_g = vec![false; g.node_count()];
-
         //log::trace!("[reduce] graph before: {:?}", g);
 
         for (clique_idx, clique) in crit.cliques.iter().enumerate() {
             let (clique_neighbors, clique_crit_neighbor_count) =
-                get_clique_neighbors(clique_idx, &crit, &removed_g);
-            let edit_set = calculate_edits_to_remove_clique_and_neighborhood(
-                g,
-                &removed_g,
-                clique,
-                &clique_neighbors,
-            );
+                get_clique_neighbors(g, clique_idx, &crit);
+            let edit_set =
+                calculate_edits_to_remove_clique_and_neighborhood(g, clique, &clique_neighbors);
 
             let clique_len = clique.vertices.len();
             let neighbors_len = clique_neighbors.len();
@@ -150,12 +144,11 @@ pub fn apply_reductions(g: &mut Graph, imap: &mut IndexMap, k: &mut f32) -> Opti
                     // TODO: If we keep applying removed_g every while iteration, these calls here
                     // don't actually need to deal with it.
 
-                    let neighbors2 = get_clique_neighbors2(clique_idx, &crit, &removed_g);
+                    let neighbors2 = get_clique_neighbors2(g, clique_idx, &crit);
 
                     let threshold = (clique_len + neighbors_len) / 2;
                     for &u in &neighbors2 {
-                        let count =
-                            count_intersection(g.neighbors(u), &clique_neighbors, &removed_g);
+                        let count = count_intersection(g.neighbors(u), &clique_neighbors);
                         if count > threshold {
                             rule4_vertex = Some(u);
                             break;
@@ -190,7 +183,6 @@ pub fn apply_reductions(g: &mut Graph, imap: &mut IndexMap, k: &mut f32) -> Opti
                     g,
                     imap,
                     k,
-                    &mut removed_g,
                     &mut edits,
                     edit_set,
                     &clique,
@@ -244,15 +236,7 @@ pub fn apply_reductions(g: &mut Graph, imap: &mut IndexMap, k: &mut f32) -> Opti
                 rule5_state.unwrap();
             assert!(clique_crit_neighbor_count == 1 && clique_neighbors2.len() == 1);
             log::error!("Applying rule 5");
-            let has_reduced = apply_rule5(
-                g,
-                imap,
-                k,
-                &mut removed_g,
-                &mut edits,
-                &clique,
-                &clique_neighbors,
-            );
+            let has_reduced = apply_rule5(g, imap, k, &mut edits, &clique, &clique_neighbors);
 
             if !has_reduced {
                 // All the other rules didn't apply, so we got here, and now 5 didn't do anything
@@ -264,9 +248,8 @@ pub fn apply_reductions(g: &mut Graph, imap: &mut IndexMap, k: &mut f32) -> Opti
 
         //log::trace!("[reduce] graph after: {:?}", g);
 
-        let removed_count = removed_g.iter().filter(|&&b| b).count();
-
-        if removed_count == 0 {
+        let new_count = g.present_node_count();
+        if new_count == g.size() {
             continue;
         }
 
@@ -281,19 +264,23 @@ pub fn apply_reductions(g: &mut Graph, imap: &mut IndexMap, k: &mut f32) -> Opti
         // TODO: Possibly test whether it's faster to just keep the removed_g map around in a larger
         // scope rather than creating the graph here.
 
-        let mut new_g = Graph::new(g.node_count() - removed_count);
-        let mut new_imap = IndexMap::new(new_g.node_count());
+        if new_count == 0 {
+            return Some(edits);
+        }
+
+        let mut new_g = Graph::new(new_count);
+        let mut new_imap = IndexMap::new(new_count);
         let mut new_vertex = 0;
 
-        let mut reverse_imap = IndexMap::new(g.node_count());
+        let mut reverse_imap = IndexMap::new(g.size());
 
-        for u in 0..g.node_count() {
-            if removed_g[u] {
+        for u in 0..g.size() {
+            if !g.is_present(u) {
                 continue;
             }
 
             for v in g.neighbors(u) {
-                if v > u || removed_g[v] {
+                if v > u {
                     continue;
                 }
 
@@ -317,9 +304,9 @@ pub fn apply_reductions(g: &mut Graph, imap: &mut IndexMap, k: &mut f32) -> Opti
 /// Gets all the vertices that are neighbors of the critical clique, but not in the clique
 /// themselves. No specific order is guaranteed.
 fn get_clique_neighbors(
+    g: &Graph,
     clique_idx: usize,
     crit_graph: &CritCliqueGraph,
-    removed_g: &[bool],
 ) -> (Vec<usize>, usize) {
     let crit_neighbors = crit_graph.graph.neighbors(clique_idx);
     let mut count = 0;
@@ -329,16 +316,12 @@ fn get_clique_neighbors(
             &crit_graph.cliques[n].vertices
         })
         .copied()
-        .filter(|&u| !removed_g[u])
+        .filter(|&u| g.is_present(u))
         .collect();
     (neighborhood, count)
 }
 
-fn get_clique_neighbors2(
-    clique_idx: usize,
-    crit_graph: &CritCliqueGraph,
-    removed_g: &[bool],
-) -> Vec<usize> {
+fn get_clique_neighbors2(g: &Graph, clique_idx: usize, crit_graph: &CritCliqueGraph) -> Vec<usize> {
     let crit_neighbors = crit_graph.graph.neighbors(clique_idx).collect::<Vec<_>>();
 
     crit_neighbors
@@ -351,14 +334,14 @@ fn get_clique_neighbors2(
                 .flat_map(|n2| &crit_graph.cliques[n2].vertices)
         })
         .copied()
-        .filter(|&u| !removed_g[u])
+        .filter(|&u| g.is_present(u))
         .collect()
 }
 
-fn count_intersection(n1: impl Iterator<Item = usize>, n2: &[usize], removed_g: &[bool]) -> usize {
+fn count_intersection(n1: impl Iterator<Item = usize>, n2: &[usize]) -> usize {
     let mut count = 0;
     for u in n1 {
-        if !removed_g[u] && n2.contains(&u) {
+        if n2.contains(&u) {
             count += 1;
         }
     }
@@ -373,7 +356,6 @@ struct EditSet {
 
 fn calculate_edits_to_remove_clique_and_neighborhood(
     g: &Graph,
-    removed_g: &[bool],
     clique: &CritClique,
     clique_neighbors: &[usize],
 ) -> EditSet {
@@ -395,14 +377,14 @@ fn calculate_edits_to_remove_clique_and_neighborhood(
 
     for i in 0..clique_neighbors.len() {
         let u = clique_neighbors[i];
-        if removed_g[u] {
+        if !g.is_present(u) {
             continue;
         }
 
         // Add edges to other clique neighbors.
         for j in (i + 1)..clique_neighbors.len() {
             let v = clique_neighbors[j];
-            if removed_g[v] {
+            if !g.is_present(v) {
                 continue;
             }
 
@@ -418,8 +400,8 @@ fn calculate_edits_to_remove_clique_and_neighborhood(
         // Remove edges to unrelated vertices.
         // TODO: Try using a BTreeSet for neighbors and vertices, or using some kind of other iteration
         // strategy to avoid the linear search here.
-        for v in 0..g.node_count() {
-            if u == v || removed_g[v] {
+        for v in 0..g.size() {
+            if u == v || !g.is_present(v) {
                 continue;
             }
 
@@ -444,7 +426,6 @@ fn make_clique_and_neighborhood_disjoint_and_remove(
     g: &mut Graph,
     imap: &IndexMap,
     k: &mut f32,
-    removed_g: &mut [bool],
     edits: &mut Vec<Edit>,
     edits_to_perform: EditSet,
     clique: &CritClique,
@@ -467,10 +448,10 @@ fn make_clique_and_neighborhood_disjoint_and_remove(
     // Now mark the clique and its neighbors as "removed" from the graph, so future reduction and
     // algorithm steps ignore it. (It is now a disjoint clique, i.e. already done.)
     for &u in clique_neighbors {
-        removed_g[u] = true;
+        g.set_present(u, false);
     }
     for &u in &clique.vertices {
-        removed_g[u] = true;
+        g.set_present(u, false);
     }
 
     clique_neighbors.len() > 0 || clique.vertices.len() > 0
@@ -531,7 +512,6 @@ fn apply_rule5(
     g: &mut Graph,
     imap: &IndexMap,
     k: &mut f32,
-    removed_g: &mut [bool],
     edits: &mut Vec<Edit>,
     clique: &CritClique,
     clique_neighbors: &[usize],
@@ -551,10 +531,10 @@ fn apply_rule5(
         .collect::<Vec<_>>();
 
     for &u in &to_remove {
-        removed_g[u] = true;
+        g.set_present(u, false);
 
-        for v in 0..g.node_count() {
-            if removed_g[v] {
+        for v in 0..g.size() {
+            if !g.is_present(v) {
                 continue;
             }
 

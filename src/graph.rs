@@ -7,6 +7,7 @@
 /// TODO: How exactly do we handle edges with weight =0?
 #[derive(Clone, Debug)]
 pub struct Graph {
+    size: usize,
     /// The graph is internally stored as a linearized triangular matrix.
     /// An example matrix for a graph with four vertices might look like this:
     /// ```txt
@@ -19,7 +20,14 @@ pub struct Graph {
     /// ```
     /// This would be stored as `[a, b, c, d, e, f]` in the `matrix` field.
     matrix: Vec<f32>,
-    size: usize,
+    /// The data structure is treated as very fixed-size at the moment, but on order to efficiently
+    /// merge vertices in the algorithm, it is possible to mark vertices as "removed"/not-present.
+    /// Such vertices will not be returned as part of any neighbor-sets etc. Accessing the weight
+    /// of an edge involving a removed vertex is an error, but only checked in debug mode for
+    /// performance reasons.
+    /// Any users of this struct that iterate manually over some index range must check themself
+    /// whether a vertex is removed, using `.is_present(u)`.
+    present: Vec<bool>,
     /// Stores a mapping from row index to the starting index of that row in the `matrix` list.
     row_offsets: Vec<usize>,
 }
@@ -28,6 +36,7 @@ impl Graph {
     /// Creates a new empty (without any edges) graph with `size` vertices, with all weights set to
     /// -1.0.
     pub fn new(size: usize) -> Self {
+        assert!(size > 0);
         let mat_size = (size * (size - 1) / 2) as usize;
 
         let row_offsets =
@@ -40,6 +49,7 @@ impl Graph {
         Graph {
             size,
             matrix: vec![-1.0; mat_size],
+            present: vec![true; size],
             row_offsets,
         }
     }
@@ -71,13 +81,19 @@ impl Graph {
         let mut pg = crate::PetGraph::with_capacity(self.size, 0);
 
         for u in 0..self.size {
-            pg.add_node(imap.map(|m| m[u]).unwrap_or(u));
+            if self.present[u] {
+                pg.add_node(imap.map(|m| m[u]).unwrap_or(u));
+            }
         }
 
         for u in 0..self.size {
-            for v in (u + 1)..self.size {
-                if self.get_direct(u, v) > 0.0 {
-                    pg.add_edge(NodeIndex::new(u), NodeIndex::new(v), 0);
+            if self.present[u] {
+                for v in (u + 1)..self.size {
+                    if self.present[v] {
+                        if self.get_direct(u, v) > 0.0 {
+                            pg.add_edge(NodeIndex::new(u), NodeIndex::new(v), 0);
+                        }
+                    }
                 }
             }
         }
@@ -88,6 +104,8 @@ impl Graph {
     /// Get the weight associated with pair `(u, v)`.
     /// u and v can be in any order, panics if `u == v`.
     pub fn get(&self, u: usize, v: usize) -> f32 {
+        debug_assert!(self.present[u]);
+        debug_assert!(self.present[v]);
         assert_ne!(u, v);
 
         if u < v {
@@ -100,6 +118,8 @@ impl Graph {
     /// Get the weight associated with pair `(u, v)`.
     /// u and v can be in any order, panics if `u == v`.
     pub fn get_ref(&self, u: usize, v: usize) -> &f32 {
+        debug_assert!(self.present[u]);
+        debug_assert!(self.present[v]);
         assert_ne!(u, v);
 
         if u < v {
@@ -112,6 +132,8 @@ impl Graph {
     /// Get a mutable reference to the weight associated with pair `(u, v)`.
     /// u and v can be in any order, panics if `u == v`.
     pub fn get_mut(&mut self, u: usize, v: usize) -> &mut f32 {
+        debug_assert!(self.present[u]);
+        debug_assert!(self.present[v]);
         assert_ne!(u, v);
 
         if u < v {
@@ -124,6 +146,8 @@ impl Graph {
     /// Set the weight associated with pair `(u, v)`.
     /// u and v can be in any order, panics if `u == v`.
     pub fn set(&mut self, u: usize, v: usize, w: f32) {
+        debug_assert!(self.present[u]);
+        debug_assert!(self.present[v]);
         assert_ne!(u, v);
 
         if u < v {
@@ -135,54 +159,87 @@ impl Graph {
 
     /// Like `get`, but assumes `u != v` and `u < v` instead of checking both.
     pub fn get_direct(&self, u: usize, v: usize) -> f32 {
+        debug_assert!(self.present[u]);
+        debug_assert!(self.present[v]);
         self.matrix[self.row_offsets[v] + u]
     }
     /// Like `get_ref`, but assumes `u != v` and `u < v` instead of checking both.
     pub fn get_ref_direct(&self, u: usize, v: usize) -> &f32 {
+        debug_assert!(self.present[u]);
+        debug_assert!(self.present[v]);
         &self.matrix[self.row_offsets[v] + u]
     }
     /// Like `get_mut`, but assumes `u != v` and `u < v` instead of checking both.
     pub fn get_mut_direct(&mut self, u: usize, v: usize) -> &mut f32 {
+        debug_assert!(self.present[u]);
+        debug_assert!(self.present[v]);
         &mut self.matrix[self.row_offsets[v] + u]
     }
     /// Like `set`, but assumes `u != v` and `u < v` instead of checking both.
     pub fn set_direct(&mut self, u: usize, v: usize, w: f32) {
+        debug_assert!(self.present[u]);
+        debug_assert!(self.present[v]);
         self.matrix[self.row_offsets[v] + u] = w;
     }
 
     /// Returns an iterator over the open neighborhood of `u` (i.e., not including `u` itself). The
     /// neighbors are guaranteed to be in ascending order.
     pub fn neighbors(&self, u: usize) -> impl Iterator<Item = usize> + '_ {
+        debug_assert!(self.present[u]);
         (0..u)
-            .filter(move |&v| self.get_direct(v, u) > 0.0)
-            .chain(((u + 1)..self.size).filter(move |&v| self.get_direct(u, v) > 0.0))
+            .filter(move |&v| self.present[v] && self.get_direct(v, u) > 0.0)
+            .chain(
+                ((u + 1)..self.size)
+                    .filter(move |&v| self.present[v] && self.get_direct(u, v) > 0.0),
+            )
     }
 
     /// Returns an iterator over the closed neighborhood of `u` (i.e., including `u` itself). The
     /// neighbors are guaranteed to be in ascending order.
     pub fn closed_neighbors(&self, u: usize) -> impl Iterator<Item = usize> + '_ {
+        debug_assert!(self.present[u]);
         (0..u)
-            .filter(move |&v| self.get_direct(v, u) > 0.0)
+            .filter(move |&v| self.present[v] && self.get_direct(v, u) > 0.0)
             .chain(std::iter::once(u))
-            .chain(((u + 1)..self.size).filter(move |&v| self.get_direct(u, v) > 0.0))
+            .chain(
+                ((u + 1)..self.size)
+                    .filter(move |&v| self.present[v] && self.get_direct(u, v) > 0.0),
+            )
     }
 
-    /// Returns the number of nodes in this graph.
-    pub fn node_count(&self) -> usize {
+    /// Returns the size of the graph.
+    /// Note that this also includes nodes marked as "not present".
+    pub fn size(&self) -> usize {
         self.size
+    }
+
+    pub fn present_node_count(&self) -> usize {
+        (0..self.size).filter(move |&v| self.present[v]).count()
     }
 
     /// Returns an iterator over all the nodes present in the graph.
     pub fn nodes(&self) -> impl Iterator<Item = usize> + '_ {
-        0..self.size
+        (0..self.size).filter(move |&v| self.present[v])
     }
 
     pub fn has_edge(&self, u: usize, v: usize) -> bool {
+        debug_assert!(self.present[u]);
+        debug_assert!(self.present[v]);
         self.get(u, v) > 0.0
     }
 
     pub fn has_edge_direct(&self, u: usize, v: usize) -> bool {
+        debug_assert!(self.present[u]);
+        debug_assert!(self.present[v]);
         self.get_direct(u, v) > 0.0
+    }
+
+    pub fn is_present(&self, u: usize) -> bool {
+        self.present[u]
+    }
+
+    pub fn set_present(&mut self, u: usize, present: bool) {
+        self.present[u] = present;
     }
 
     /// Splits a graph into its connected components.
@@ -195,7 +252,7 @@ impl Graph {
         let mut current = Vec::new();
 
         for u in 0..self.size {
-            if visited[u] {
+            if visited[u] || !self.present[u] {
                 continue;
             }
 

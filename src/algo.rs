@@ -24,7 +24,7 @@ pub fn find_optimal_cluster_editing(g: &Graph) -> (i32, Vec<Edit>) {
     // TODO: Not sure if executing the algo once with k = 0 is the best
     // way of handling already-disjoint-clique-components.
 
-    let original_node_count = g.node_count();
+    let original_node_count = g.size();
     info!(
         "Computing optimal solution for graph with {} nodes.",
         original_node_count
@@ -37,7 +37,7 @@ pub fn find_optimal_cluster_editing(g: &Graph) -> (i32, Vec<Edit>) {
         // The algorithm works on reduced/modified graphs in parts, but when editing those we want
         // to create `Edit` values that are usable on the original graph; we can create those by
         // using the imap.
-        let mut imap = IndexMap::identity(g.node_count());
+        let mut imap = IndexMap::identity(g.size());
 
         info!("[driver] Starting search with k={}, reducing now...", k);
         unsafe {
@@ -59,7 +59,7 @@ pub fn find_optimal_cluster_editing(g: &Graph) -> (i32, Vec<Edit>) {
             k,
             reduced_k,
             original_node_count,
-            g.node_count()
+            g.size()
         );
 
         if let Some((_, edits)) = find_cluster_editing(g, imap, edits, reduced_k) {
@@ -79,7 +79,7 @@ static mut K_MAX: f32 = 0.0;
 // the WeightMap a lot, which are floats.
 fn find_cluster_editing(
     mut g: Graph,
-    mut imap: IndexMap,
+    imap: IndexMap,
     mut edits: Vec<Edit>,
     mut k: f32,
 ) -> Option<(f32, Vec<Edit>)> {
@@ -236,6 +236,16 @@ fn find_cluster_editing(
     best
 }
 
+fn merge(
+    g: &mut Graph,
+    imap: &mut IndexMap,
+    k: &mut f32,
+    edits: &mut Vec<Edit>,
+    u: usize,
+    v: usize,
+) {
+}
+
 /// Reduces the problem instance. Modifies the mutable arguments directly to be a smaller
 /// instance. If this discovers the instance is not solvable at all, returns `None`. Otherwise
 /// returns the list of edits performed (which may be empty).
@@ -272,6 +282,21 @@ fn reduce(g: &mut Graph, imap: &mut IndexMap, k: &mut f32) -> Option<Vec<Edit>> 
             old_k,
             k
         );
+    }
+
+    // TODO: This is just for debugging, should take out at some point
+    if *k > 0.0 {
+        for u in 0..g.size() {
+            if !g.is_present(u) {
+                continue;
+            }
+            for v in (u + 1)..g.size() {
+                if !g.is_present(v) {
+                    continue;
+                }
+                assert!(g.get_direct(u, v).is_finite());
+            }
+        }
     }
 
     edits
