@@ -3,8 +3,6 @@
 /// Edges have weights >0, non-edges have weights <0.
 ///
 /// Accessing self-loop weights will panic!
-///
-/// TODO: How exactly do we handle edges with weight =0?
 #[derive(Clone, Debug)]
 pub struct Graph {
     size: usize,
@@ -63,7 +61,7 @@ impl Graph {
         let mut imap = IndexMap::new(pg.node_count());
 
         for v in pg.node_indices() {
-            imap[v.index()] = *pg.node_weight(v).unwrap();
+            imap[v.index()] = vec![*pg.node_weight(v).unwrap()];
         }
 
         for e in pg.edge_indices() {
@@ -75,14 +73,17 @@ impl Graph {
     }
 
     /// Creates a petgraph graph from this graph.
+    /// If the imap indicates the graph contains merged vertices, the merged vertex is assigned the
+    /// weight of the *first* vertex in its list, and the rest are discarded.
     pub fn into_petgraph(&self, imap: Option<&IndexMap>) -> crate::PetGraph {
         use petgraph::prelude::NodeIndex;
 
         let mut pg = crate::PetGraph::with_capacity(self.size, 0);
 
+        let mut map = vec![NodeIndex::new(0); self.size];
         for u in 0..self.size {
             if self.present[u] {
-                pg.add_node(imap.map(|m| m[u]).unwrap_or(u));
+                map[u] = pg.add_node(imap.map(|m| *m[u].first().unwrap()).unwrap_or(u));
             }
         }
 
@@ -91,7 +92,7 @@ impl Graph {
                 for v in (u + 1)..self.size {
                     if self.present[v] {
                         if self.get_direct(u, v) > 0.0 {
-                            pg.add_edge(NodeIndex::new(u), NodeIndex::new(v), 0);
+                            pg.add_edge(map[u], map[v], 0);
                         }
                     }
                 }
@@ -244,12 +245,16 @@ impl Graph {
 
     /// Splits a graph into its connected components.
     /// An associated index map is also split into equivalent maps for each individual component.
-    pub fn split_into_components(&self, imap: &IndexMap) -> Vec<(Self, IndexMap)> {
+    /// In addition, this also provides a mapping from vertices in this graph to the index of the
+    /// component they are a part of.
+    pub fn split_into_components(&self, imap: &IndexMap) -> (Vec<(Self, IndexMap)>, Vec<usize>) {
         let mut visited = vec![false; self.size];
         let mut stack = Vec::new();
         let mut components = Vec::new();
 
         let mut current = Vec::new();
+
+        let mut component_map = vec![0; self.size];
 
         for u in 0..self.size {
             if visited[u] || !self.present[u] {
@@ -277,7 +282,8 @@ impl Graph {
             let mut comp_imap = IndexMap::new(current.len());
             for i in 0..current.len() {
                 let v = current[i];
-                comp_imap[i] = imap[v];
+                comp_imap[i] = imap[v].clone();
+                component_map[v] = components.len();
 
                 for j in 0..i {
                     let w = current[j];
@@ -290,7 +296,7 @@ impl Graph {
             current.clear();
         }
 
-        components
+        (components, component_map)
     }
 }
 
@@ -317,31 +323,37 @@ impl std::ops::IndexMut<(usize, usize)> for Graph {
 /// graph. An `IndexMap` can store such a mapping.
 #[derive(Clone, Debug)]
 pub struct IndexMap {
-    map: Vec<usize>,
+    map: Vec<Option<Vec<usize>>>,
 }
 
 impl IndexMap {
     pub fn new(size: usize) -> Self {
-        Self { map: vec![0; size] }
+        Self {
+            map: vec![Some(vec![0]); size],
+        }
     }
 
     pub fn identity(size: usize) -> Self {
         Self {
-            map: (0..size).collect(),
+            map: (0..size).map(|i| Some(vec![i])).collect(),
         }
+    }
+
+    pub fn take(&mut self, i: usize) -> Vec<usize> {
+        self.map[i].take().unwrap()
     }
 }
 
 impl std::ops::Index<usize> for IndexMap {
-    type Output = usize;
+    type Output = Vec<usize>;
     fn index(&self, index: usize) -> &Self::Output {
-        &self.map[index]
+        self.map[index].as_ref().unwrap()
     }
 }
 
 impl std::ops::IndexMut<usize> for IndexMap {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        &mut self.map[index]
+        self.map[index].as_mut().unwrap()
     }
 }
 

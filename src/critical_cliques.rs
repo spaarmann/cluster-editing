@@ -118,8 +118,6 @@ pub fn apply_reductions(g: &mut Graph, imap: &mut IndexMap, k: &mut f32) -> Opti
 
         let crit = build_crit_clique_graph(g);
 
-        //log::trace!("[reduce] graph before: {:?}", g);
-
         for (clique_idx, clique) in crit.cliques.iter().enumerate() {
             let (clique_neighbors, clique_crit_neighbor_count) =
                 get_clique_neighbors(g, clique_idx, &crit);
@@ -141,9 +139,6 @@ pub fn apply_reductions(g: &mut Graph, imap: &mut IndexMap, k: &mut f32) -> Opti
             if !rule1_applicable && !rule2_applicable {
                 // Only calculate this if the other two aren't already true since it's a bit more work
                 if clique_len < neighbors_len && clique_len + neighbors_len > total_edit_degree {
-                    // TODO: If we keep applying removed_g every while iteration, these calls here
-                    // don't actually need to deal with it.
-
                     let neighbors2 = get_clique_neighbors2(g, clique_idx, &crit);
 
                     let threshold = (clique_len + neighbors_len) / 2;
@@ -170,14 +165,6 @@ pub fn apply_reductions(g: &mut Graph, imap: &mut IndexMap, k: &mut f32) -> Opti
                 }
             }
 
-            /*log::warn!(
-                "rule applicability: [{}, {}, {}, {}]",
-                rule1_applicable,
-                rule2_applicable,
-                rule3_applicable,
-                rule4_applicable
-            );*/
-
             if rule1_applicable || rule2_applicable || rule3_applicable {
                 let has_reduced = make_clique_and_neighborhood_disjoint_and_remove(
                     g,
@@ -188,8 +175,6 @@ pub fn apply_reductions(g: &mut Graph, imap: &mut IndexMap, k: &mut f32) -> Opti
                     &clique,
                     &clique_neighbors,
                 );
-
-                //log::warn!("k after: {}", *k);
 
                 if *k < 0.0 {
                     return None;
@@ -202,8 +187,6 @@ pub fn apply_reductions(g: &mut Graph, imap: &mut IndexMap, k: &mut f32) -> Opti
             }
 
             if rule4_applicable {
-                // TODO: If we stop applying removed_g every `while` iteration, this needs to take
-                // it into account.
                 let has_reduced = apply_rule4(
                     g,
                     imap,
@@ -235,7 +218,6 @@ pub fn apply_reductions(g: &mut Graph, imap: &mut IndexMap, k: &mut f32) -> Opti
             let (clique, clique_neighbors, clique_crit_neighbor_count, clique_neighbors2) =
                 rule5_state.unwrap();
             assert!(clique_crit_neighbor_count == 1 && clique_neighbors2.len() == 1);
-            log::error!("Applying rule 5");
             let has_reduced = apply_rule5(g, imap, k, &mut edits, &clique, &clique_neighbors);
 
             if !has_reduced {
@@ -245,8 +227,6 @@ pub fn apply_reductions(g: &mut Graph, imap: &mut IndexMap, k: &mut f32) -> Opti
             }
             any_rules_applied = true;
         }
-
-        //log::trace!("[reduce] graph after: {:?}", g);
 
         let new_count = g.present_node_count();
         if new_count == g.size() {
@@ -272,7 +252,7 @@ pub fn apply_reductions(g: &mut Graph, imap: &mut IndexMap, k: &mut f32) -> Opti
         let mut new_imap = IndexMap::new(new_count);
         let mut new_vertex = 0;
 
-        let mut reverse_imap = IndexMap::new(g.size());
+        let mut reverse_imap = vec![0; g.size()];
 
         for u in 0..g.size() {
             if !g.is_present(u) {
@@ -288,7 +268,7 @@ pub fn apply_reductions(g: &mut Graph, imap: &mut IndexMap, k: &mut f32) -> Opti
             }
 
             reverse_imap[u] = new_vertex;
-            new_imap[new_vertex] = imap[u];
+            new_imap[new_vertex] = imap.take(u);
             new_vertex += 1;
         }
 
@@ -434,14 +414,14 @@ fn make_clique_and_neighborhood_disjoint_and_remove(
     for (u, v) in edits_to_perform.inserts {
         let uv = g.get_mut(u, v);
         *k += *uv;
-        edits.push(Edit::insert(&imap, u, v));
+        Edit::insert(edits, &imap, u, v);
         *uv = f32::INFINITY;
     }
 
     for (u, v) in edits_to_perform.deletions {
         let uv = g.get_mut(u, v);
         *k -= *uv;
-        edits.push(Edit::delete(&imap, u, v));
+        Edit::delete(edits, &imap, u, v);
         *uv = f32::NEG_INFINITY;
     }
 
@@ -479,7 +459,7 @@ fn apply_rule4(
             let vw = g.get_mut(v, w);
             if *vw < 0.0 {
                 *k += *vw;
-                edits.push(Edit::insert(&imap, v, w));
+                Edit::insert(edits, &imap, v, w);
                 *vw = f32::INFINITY;
 
                 has_done_edit = true;
@@ -497,7 +477,7 @@ fn apply_rule4(
             let vw = g.get_mut(v, w);
             if *vw > 0.0 {
                 *k -= *vw;
-                edits.push(Edit::delete(&imap, v, w));
+                Edit::delete(edits, &imap, v, w);
                 *vw = f32::NEG_INFINITY;
 
                 has_done_edit = true;
@@ -540,7 +520,7 @@ fn apply_rule5(
 
             let uv = g.get_mut(u, v);
             if *uv > 0.0 {
-                edits.push(Edit::delete(imap, u, v));
+                Edit::delete(edits, imap, u, v);
                 *uv = f32::NEG_INFINITY;
             }
         }
