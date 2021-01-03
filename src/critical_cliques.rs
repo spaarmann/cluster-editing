@@ -1,4 +1,3 @@
-use crate::algo::Edit;
 use crate::{graph::IndexMap, Graph};
 
 #[derive(Debug, Clone, Default)]
@@ -106,10 +105,49 @@ fn should_be_neighbors(g: &Graph, c1: &CritClique, c2: &CritClique) -> bool {
     true
 }
 
-// Chen and Meng: A 2k Kernel for the Cluster Editing Problem, 2010
-pub fn apply_reductions(g: &mut Graph, imap: &mut IndexMap, k: &mut f32) -> Option<Vec<Edit>> {
-    let mut edits = Vec::new();
+/// Performs a parameter-independent reduction on the graph `g` by constructing the critical clique
+/// graph and merging all critical cliques into a single vertex.
+/// This assumes that the input graph is unweighted (i.e. all weights are +1 or -1 exactly). The
+/// reduced graph will be weighted however.
+pub fn merge_cliques(g: &Graph, imap: &IndexMap) -> (Graph, IndexMap) {
+    let mut crit = build_crit_clique_graph(g);
 
+    let mut crit_imap = IndexMap::empty(crit.graph.size());
+
+    for u in 0..crit.graph.size() {
+        for v in (u + 1)..crit.graph.size() {
+            let uv = crit.graph.get_mut_direct(u, v);
+            let sign = uv.signum();
+            let weight = crit.cliques[u].vertices.len() * crit.cliques[v].vertices.len();
+            *uv = (weight as f32).copysign(sign);
+        }
+
+        crit_imap.set(
+            u,
+            crit.cliques[u]
+                .vertices
+                .iter()
+                .flat_map(|v| imap[*v].iter().copied())
+                .collect(),
+        );
+    }
+
+    (crit.graph, crit_imap)
+}
+
+// This kernel can only straightforwardly be applied to unweighted instances.
+// However, before even starting the parameter search, we reduce the unweighted graph by converting
+// it into a weighted one. Thus we cannot use this kernel at the moment.
+
+/*
+
+// Chen and Meng: A 2k Kernel for the Cluster Editing Problem, 2010
+pub fn apply_reductions(
+    g: &mut Graph,
+    imap: &mut IndexMap,
+    k: &mut f32,
+    edits: &mut Vec<Edit>,
+) -> bool {
     let mut any_rules_applied = true;
     while any_rules_applied {
         any_rules_applied = false;
@@ -170,14 +208,14 @@ pub fn apply_reductions(g: &mut Graph, imap: &mut IndexMap, k: &mut f32) -> Opti
                     g,
                     imap,
                     k,
-                    &mut edits,
+                    edits,
                     edit_set,
                     &clique,
                     &clique_neighbors,
                 );
 
                 if *k < 0.0 {
-                    return None;
+                    return false;
                 }
 
                 if has_reduced {
@@ -191,14 +229,14 @@ pub fn apply_reductions(g: &mut Graph, imap: &mut IndexMap, k: &mut f32) -> Opti
                     g,
                     imap,
                     k,
-                    &mut edits,
+                    edits,
                     &clique_neighbors,
                     &clique_neighbors2.unwrap(),
                     rule4_vertex.unwrap(),
                 );
 
                 if *k < 0.0 {
-                    return None;
+                    return false;
                 }
 
                 if has_reduced {
@@ -218,7 +256,7 @@ pub fn apply_reductions(g: &mut Graph, imap: &mut IndexMap, k: &mut f32) -> Opti
             let (clique, clique_neighbors, clique_crit_neighbor_count, clique_neighbors2) =
                 rule5_state.unwrap();
             assert!(clique_crit_neighbor_count == 1 && clique_neighbors2.len() == 1);
-            let has_reduced = apply_rule5(g, imap, k, &mut edits, &clique, &clique_neighbors);
+            let has_reduced = apply_rule5(g, imap, k, edits, &clique, &clique_neighbors);
 
             if !has_reduced {
                 // All the other rules didn't apply, so we got here, and now 5 didn't do anything
@@ -245,7 +283,7 @@ pub fn apply_reductions(g: &mut Graph, imap: &mut IndexMap, k: &mut f32) -> Opti
         // scope rather than creating the graph here.
 
         if new_count == 0 {
-            return Some(edits);
+            return true;
         }
 
         let mut new_g = Graph::new(new_count);
@@ -276,7 +314,7 @@ pub fn apply_reductions(g: &mut Graph, imap: &mut IndexMap, k: &mut f32) -> Opti
         *imap = new_imap;
     }
 
-    Some(edits)
+    true
 }
 
 // TODO: COOOOMMMEEEENNNNTTTTSSSS!!!!
@@ -530,6 +568,8 @@ fn apply_rule5(
 
     to_remove.len() > 0
 }
+
+*/
 
 #[cfg(test)]
 mod tests {

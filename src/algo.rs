@@ -1,6 +1,6 @@
 use crate::{critical_cliques, graph::IndexMap, Graph};
 
-use log::{info, trace};
+use log::info;
 
 #[derive(Copy, Clone, Debug)]
 pub enum Edit {
@@ -28,16 +28,16 @@ impl Edit {
 
 macro_rules! dbg_trace_indent {
     ($k:expr, $s:expr) => (
-        #[cfg(debug)]
+        #[cfg(not(release))]
         {
-            log!($crate::Level::Trace, concat!("{}[k={}]", $s),
+            log::log!(log::Level::Trace, concat!("{}[k={}]", $s),
                 "\t".repeat((unsafe { K_MAX - $k.max(0.0) }) as usize), $k);
         }
     );
     ($k:expr, $s:expr, $($arg:tt)+) => (
-        #[cfg(debug)]
+        #[cfg(not(release))]
         {
-            log!($crate::Level::Trace, concat!("{}[k={}]", $s),
+            log::log!(log::Level::Trace, concat!("{}[k={}]", $s),
                 "\t".repeat((unsafe { K_MAX - $k.max(0.0) }) as usize),
                 $k, $($arg)+);
         }
@@ -45,8 +45,6 @@ macro_rules! dbg_trace_indent {
 }
 
 pub fn find_optimal_cluster_editing(g: &Graph) -> (i32, Vec<Edit>) {
-    let mut k = 0.0;
-
     // TODO: Not sure if executing the algo once with k = 0 is the best
     // way of handling already-disjoint-clique-components.
 
@@ -56,39 +54,33 @@ pub fn find_optimal_cluster_editing(g: &Graph) -> (i32, Vec<Edit>) {
         original_node_count
     );
 
+    let (reduced_g, imap, edits, k_start) =
+        param_independent_reduction(g, &IndexMap::identity(g.size()));
+
+    info!(
+        "Reduced graph from {} nodes to {} nodes using parameter-independent reduction.",
+        original_node_count,
+        reduced_g.size()
+    );
+
+    let mut k = k_start;
     loop {
-        let mut g = g.clone();
+        let reduced_g = reduced_g.clone();
         // The imap is used to always have a mapping from the current indices used by the graph to
         // what indices those vertices have in the original graph.
         // The algorithm works on reduced/modified graphs in parts, but when editing those we want
         // to create `Edit` values that are usable on the original graph; we can create those by
         // using the imap.
-        let mut imap = IndexMap::identity(g.size());
+        let imap = imap.clone();
 
-        info!("[driver] Starting search with k={}, reducing now...", k);
+        info!("[driver] Starting search with k={}...", k);
         unsafe {
             K_MAX = k;
         }
 
-        let mut reduced_k = k;
-        let edits = Vec::new();
-        /*match reduce(&mut g, &mut imap, &mut reduced_k) {
-            None => {
-                k += 1.0;
-                continue;
-            }
-            Some(reduce_edits) => edits = reduce_edits,
-        }*/
+        let edits = edits.clone();
 
-        /*info!(
-            "[driver] Reduced problem with k={} to k={}, from n={} to n={}",
-            k,
-            reduced_k,
-            original_node_count,
-            g.size()
-        );*/
-
-        if let Some((_, edits)) = find_cluster_editing(g, imap, edits, reduced_k) {
+        if let Some((_, edits)) = find_cluster_editing(reduced_g, imap, edits, k) {
             return (k as i32, edits);
         }
 
@@ -104,7 +96,7 @@ static mut K_MAX: f32 = 0.0;
 // `k` is stored as float because it needs to be compared with and changed by values from
 // the WeightMap a lot, which are floats.
 fn find_cluster_editing(
-    mut g: Graph,
+    g: Graph,
     imap: IndexMap,
     mut edits: Vec<Edit>,
     mut k: f32,
@@ -119,18 +111,18 @@ fn find_cluster_editing(
             // the optimum solution for these components separately.
             // TODO: Still not entirely convinced why this is actually *correct*.
 
-            let k_start = k;
-            for (i, (comp, comp_imap)) in components.into_iter().enumerate() {
-                dbg_trace_indent!(k_start, "Starting component {}, remaining k is {}", i, k);
+            let _k_start = k;
+            for (_i, (comp, comp_imap)) in components.into_iter().enumerate() {
+                dbg_trace_indent!(_k_start, "Starting component {}, remaining k is {}", _i, k);
 
                 // returns early if we can't even find a solution for the component,
                 // otherwise take the remaining k and proceed to the next component.
                 let comp_res = match find_cluster_editing(comp, comp_imap, edits, k) {
                     None => {
                         dbg_trace_indent!(
-                            k_start,
+                            _k_start,
                             "Finished component {} with 'no solution found', returning.",
-                            i
+                            _i
                         );
                         return None;
                     }
@@ -139,7 +131,7 @@ fn find_cluster_editing(
                 k = comp_res.0;
                 edits = comp_res.1;
 
-                dbg_trace_indent!(k_start, "Finished component {}, remaining k is {}", i, k);
+                dbg_trace_indent!(_k_start, "Finished component {}, remaining k is {}", _i, k);
             }
 
             // We still need to "cash in" any zero-edges that connect the different components.
@@ -163,7 +155,7 @@ fn find_cluster_editing(
             k -= zero_count / 2.0;
 
             dbg_trace_indent!(
-                k_start,
+                _k_start,
                 "After component split, cashed zero-edges, k now {}",
                 k
             );
@@ -205,7 +197,7 @@ fn find_cluster_editing(
         }
     }
 
-    let (v, u, w) = match triple {
+    let (v, u, _w) = match triple {
         None => {
             // No more conflict triples.
             // If there are still zero-edges, we need to "cash in" the 0.5 edit cost we deferred
@@ -239,22 +231,22 @@ fn find_cluster_editing(
         Some(t) => t,
     };
 
-    dbg_trace_indent!(k, "Found triple ({}-{}-{}), branching", v, u, w);
+    dbg_trace_indent!(k, "Found triple ({}-{}-{}), branching", v, u, _w);
 
     // Found a conflict triple, now branch into 2 cases:
     // 1. Set uv to forbidden
     let best = {
         let mut g = g.clone();
         let mut edits = edits.clone();
-        let mut imap = imap.clone();
+        let imap = imap.clone();
         let uv = g.get_mut(u, v);
         // TODO: Might not need this check after edge merging is in? Maybe?
         if uv.is_finite() {
-            let k_before = k;
-            let mut k = k - *uv;
+            let _k_before = k;
+            let k = k - *uv;
             if k >= 0.0 {
                 dbg_trace_indent!(
-                    k_before,
+                    _k_before,
                     "Branch: Set {}-{} forbidden, k after edit: {} !",
                     u,
                     v,
@@ -267,7 +259,7 @@ fn find_cluster_editing(
                 find_cluster_editing(g, imap, edits, k)
             } else {
                 dbg_trace_indent!(
-                    k_before,
+                    _k_before,
                     "Skipping Branch: Setting {}-{} to forbidden reduces k past 0!",
                     u,
                     v
@@ -288,12 +280,12 @@ fn find_cluster_editing(
         // TODO: Might not need this check after edge merging is in? Maybe?
         if uv.is_finite() {
             let mut k = k;
-            let k_before_merge = k;
+            let _k_before_merge = k;
             merge(&mut g, &mut imap, &mut k, &mut edits, u, v);
 
             if k >= 0.0 {
                 dbg_trace_indent!(
-                    k_before_merge,
+                    _k_before_merge,
                     "Branch: Merge {}-{}, k after merging: {} !",
                     u,
                     v,
@@ -303,7 +295,7 @@ fn find_cluster_editing(
                 find_cluster_editing(g, imap, edits, k)
             } else {
                 dbg_trace_indent!(
-                    k_before_merge,
+                    _k_before_merge,
                     "Skipping Branch: Merging {}-{} reduces k past 0!",
                     u,
                     v
@@ -339,8 +331,8 @@ fn merge(
     assert!(g.is_present(u));
     assert!(g.is_present(v));
 
-    let start_k = *k;
-    let start_edit_len = edits.len();
+    let _start_k = *k;
+    let _start_edit_len = edits.len();
 
     for w in 0..g.size() {
         if w == u || w == v || !g.is_present(w) {
@@ -397,13 +389,13 @@ fn merge(
     imap[u].append(&mut imap_v);
 
     dbg_trace_indent!(
-        start_k,
+        _start_k,
         "Merged {} and {}. k was {}, is now {}. New edits: {:?}",
         u,
         v,
-        start_k,
+        _start_k,
         k,
-        &edits[start_edit_len..]
+        &edits[_start_edit_len..]
     );
 }
 
@@ -438,42 +430,50 @@ fn merge_nonmatching_nonzero(
     }
 }
 
-/// Reduces the problem instance. Modifies the mutable arguments directly to be a smaller
-/// instance. If this discovers the instance is not solvable at all, returns `None`. Otherwise
-/// returns the list of edits performed (which may be empty).
-fn reduce(g: &mut Graph, imap: &mut IndexMap, k: &mut f32) -> Option<Vec<Edit>> {
-    let old_k = *k;
-    let edits = critical_cliques::apply_reductions(g, imap, k);
+/// Performs parameter-independent reduction on the graph. A new graph and corresponding IndexMap
+/// are returned, along with a list of edits performed.
+/// The reduction may also allow placing a lower bounds on the optimal `k` parameter, which is also
+/// returned.
+fn param_independent_reduction(g: &Graph, imap: &IndexMap) -> (Graph, IndexMap, Vec<Edit>, f32) {
+    let (g, imap) = critical_cliques::merge_cliques(g, imap);
 
-    if *k < 0.0 {
-        dbg_trace_indent!(
-            old_k,
-            "Found 'no solution' from applying reductions, k now {}",
-            k
-        );
-    } else if old_k > *k {
-        dbg_trace_indent!(
-            old_k,
-            "{} [k={}] Reduced instance from k={} to k={}",
-            old_k,
-            k
-        );
-    }
+    // Merging each critical clique into a single vertex leads to a graph of at most 4 * k_opt
+    // vertices.
+    //     n <= 4 * k_opt
+    // <=> n/4 <= k_opt
+    // <=> k_opt >= n/4
+
+    let k_start = (g.size() / 4) as f32;
 
     // TODO: This is just for debugging, should take out at some point
-    if *k > 0.0 {
-        for u in 0..g.size() {
-            if !g.is_present(u) {
+    for u in 0..g.size() {
+        if !g.is_present(u) {
+            continue;
+        }
+        for v in (u + 1)..g.size() {
+            if !g.is_present(v) {
                 continue;
             }
-            for v in (u + 1)..g.size() {
-                if !g.is_present(v) {
-                    continue;
-                }
-                assert!(g.get_direct(u, v).is_finite());
-            }
+            assert!(g.get_direct(u, v).is_finite());
         }
     }
 
-    edits
+    // TODO: If we never end up getting a parameter-independent reduction that produces edits,
+    // remove that return value.
+    (g, imap, Vec::new(), k_start)
 }
+
+/*
+/// Performs parameter-depdenent reduction on the graph, modifying it directly. May also modify the
+/// parameter.
+/// The reduction find that no solution exists, in that case is returns `false`. Otherwise it
+/// returns `true`.
+fn param_dependent_reduction(
+    g: &mut Graph,
+    imap: &mut IndexMap,
+    k: &mut f32,
+    edits: &mut Vec<Edit>,
+) -> bool {
+    todo!()
+}
+*/

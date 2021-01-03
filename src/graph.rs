@@ -321,26 +321,52 @@ impl std::ops::IndexMut<(usize, usize)> for Graph {
 /// This is fine (and even advantageous) for operating on a single `Graph` instance,
 /// but in some contexts it is necessary to e.g. map those indices to those of the original input
 /// graph. An `IndexMap` can store such a mapping.
+///
+/// Most of the time, users of the struct and the struct itself may assume each entry is
+/// `Some(vec)`, otherwise e.g. the indexers will just panic.
+/// Note that this is even true for the mutable indexer (since it gives a reference to the `Vec`
+/// inside). To overwrite a `None` value, use `set`.
+///
+/// It is however also possible to temporarily have `None` entries, for performance reasons. In
+/// these cases the caller must make sure the map is ultimately left in a valid state before being
+/// passed on.
 #[derive(Clone, Debug)]
 pub struct IndexMap {
     map: Vec<Option<Vec<usize>>>,
 }
 
 impl IndexMap {
+    /// Creates an a default map, mapping every index to 0.
     pub fn new(size: usize) -> Self {
         Self {
             map: vec![Some(vec![0]); size],
         }
     }
 
+    /// Creates an identity map.
     pub fn identity(size: usize) -> Self {
         Self {
             map: (0..size).map(|i| Some(vec![i])).collect(),
         }
     }
 
+    /// Creates an empty map, where each entry is `None`. *Must* be initialized fully before being
+    /// passed to any code that assumes indexing is valid etc.
+    pub fn empty(size: usize) -> Self {
+        Self {
+            map: vec![None; size],
+        }
+    }
+
+    /// Takes an entry out of the map, leaving `None`. Should only be used if the corresponding
+    /// entry will never be accessed again, or if it is immediately replaced by a new valid entry.
     pub fn take(&mut self, i: usize) -> Vec<usize> {
         self.map[i].take().unwrap()
+    }
+
+    /// Directly overwrites an entry. Use this to replace a `None` entry with a new valid entry.  
+    pub fn set(&mut self, i: usize, entry: Vec<usize>) {
+        self.map[i] = Some(entry);
     }
 }
 
