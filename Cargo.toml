@@ -3,6 +3,7 @@ name = "cluster-editing"
 version = "0.1.0"
 authors = ["Sebastian Paarmann <sebastian@s-paarmann.de>"]
 edition = "2018"
+default-run = "cluster-editing"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -11,3 +12,7 @@ env_logger = "0.8.2"
 log = "0.4.11"
 petgraph = "0.5.1"
 structopt = "0.3.21"
+
+[[bin]]
+name = "reduction"
+path = "src/tools/reduction.rs"

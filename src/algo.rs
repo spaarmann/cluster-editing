@@ -434,7 +434,10 @@ fn merge_nonmatching_nonzero(
 /// are returned, along with a list of edits performed.
 /// The reduction may also allow placing a lower bounds on the optimal `k` parameter, which is also
 /// returned.
-fn param_independent_reduction(g: &Graph, imap: &IndexMap) -> (Graph, IndexMap, Vec<Edit>, f32) {
+pub fn param_independent_reduction(
+    g: &Graph,
+    imap: &IndexMap,
+) -> (Graph, IndexMap, Vec<Edit>, f32) {
     let (g, imap) = critical_cliques::merge_cliques(g, imap);
 
     // Merging each critical clique into a single vertex leads to a graph of at most 4 * k_opt
