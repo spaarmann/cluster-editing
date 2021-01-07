@@ -36,6 +36,12 @@ struct Opt {
     /// Requires a working graphviz installation accessible in the path.
     #[structopt(long = "print-cliques", parse(from_os_str))]
     print_cliques: Option<PathBuf>,
+
+    /// Which command is used to print the graph images. Can generally be any Graphviz tool,
+    /// default is `sfdp`. `fdp` can be used for somewhat better images that take a longer time to
+    /// create.
+    #[structopt(long = "print-command", default_value = "sfdp")]
+    print_command: String,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -51,7 +57,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }?;
 
     if let Some(path) = opt.print_input {
-        graphviz::print_graph(path, &graph);
+        graphviz::print_graph(&opt.print_command, path, &graph);
     }
 
     let mut result = graph.clone();
@@ -60,7 +66,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     if let Some(path) = opt.print_cliques {
         let crit_graph = cluster_editing::critical_cliques::build_crit_clique_graph(&graph);
-        graphviz::print_graph(path, &crit_graph.into_petgraph());
+        graphviz::print_graph(&opt.print_command, path, &crit_graph.into_petgraph());
     }
 
     let (components, _) = graph.split_into_components(&imap);
@@ -123,7 +129,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
 
     if let Some(path) = opt.print_output {
-        graphviz::print_graph(path, &result);
+        graphviz::print_graph(&opt.print_command, path, &result);
     }
 
     Ok(())

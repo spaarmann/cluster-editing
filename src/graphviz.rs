@@ -8,7 +8,7 @@ use std::fmt::Display;
 use std::io::Write;
 use std::process::{Command, Stdio};
 
-pub fn print_graph<'a, G, P: AsRef<std::path::Path>>(path: P, graph: G)
+pub fn print_graph<'a, G, P: AsRef<std::path::Path>>(command: &str, path: P, graph: G)
 where
     G: GraphRef + IntoNodeReferences + IntoEdgeReferences + NodeIndexable + GraphProp + NodeCount,
     G::EdgeWeight: Display,
@@ -22,7 +22,7 @@ where
 
     let dot = Dot::with_config(graph, &[Config::EdgeNoLabel]);
 
-    let mut graphviz = Command::new("fdp")
+    let mut graphviz = Command::new(command)
         .arg("-Tpng")
         .arg(format!("-o{}", path.as_ref().display()))
         .stdin(Stdio::piped())
