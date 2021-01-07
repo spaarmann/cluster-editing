@@ -116,6 +116,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
+    info!(
+        "Output graph has {} nodes and {} edges.",
+        result.node_count(),
+        result.edge_count()
+    );
+
     if let Some(path) = opt.print_output {
         graphviz::print_graph(path, &result);
     }

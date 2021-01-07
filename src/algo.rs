@@ -1,5 +1,7 @@
 use crate::{critical_cliques, graph::IndexMap, Graph};
 
+use std::collections::HashSet;
+
 use log::info;
 
 #[derive(Copy, Clone, Debug)]
@@ -42,6 +44,16 @@ macro_rules! dbg_trace_indent {
                 $k, $($arg)+);
         }
     )
+}
+
+/// `continue_if_not_present(g, u)` executes a `continue` statement if vertex `u` is not present in
+/// Graph `g`.
+macro_rules! continue_if_not_present {
+    ($g:expr, $u:expr) => {
+        if !$g.is_present($u) {
+            continue;
+        }
+    };
 }
 
 pub fn find_optimal_cluster_editing(g: &Graph) -> (i32, Vec<Edit>) {
@@ -137,13 +149,9 @@ fn find_cluster_editing(
             // We still need to "cash in" any zero-edges that connect the different components.
             let mut zero_count = 0.0;
             for u in 0..g.size() {
-                if !g.is_present(u) {
-                    continue;
-                }
+                continue_if_not_present!(g, u);
                 for v in (u + 1)..g.size() {
-                    if !g.is_present(v) {
-                        continue;
-                    }
+                    continue_if_not_present!(g, v);
                     if component_map[u] != component_map[v] {
                         if g.get_direct(u, v).abs() < 0.001 {
                             zero_count += 1.0;
@@ -204,13 +212,9 @@ fn find_cluster_editing(
             // when merging.
             let mut zero_count = 0.0;
             for u in 0..g.size() {
-                if !g.is_present(u) {
-                    continue;
-                }
+                continue_if_not_present!(g, u);
                 for v in (u + 1)..g.size() {
-                    if !g.is_present(v) {
-                        continue;
-                    }
+                    continue_if_not_present!(g, v);
                     if g.get_direct(u, v).abs() < 0.001 {
                         zero_count += 1.0;
                     }
@@ -438,32 +442,296 @@ pub fn param_independent_reduction(
     g: &Graph,
     imap: &IndexMap,
 ) -> (Graph, IndexMap, Vec<Edit>, f32) {
+    // Simply merging all critical cliques leads to a graph with at most 4 * k_opt vertices.
     let (g, imap) = critical_cliques::merge_cliques(g, imap);
-
-    // Merging each critical clique into a single vertex leads to a graph of at most 4 * k_opt
-    // vertices.
-    //     n <= 4 * k_opt
-    // <=> n/4 <= k_opt
-    // <=> k_opt >= n/4
-
     let k_start = (g.size() / 4) as f32;
 
-    // TODO: This is just for debugging, should take out at some point
-    for u in 0..g.size() {
-        if !g.is_present(u) {
-            continue;
-        }
-        for v in (u + 1)..g.size() {
-            if !g.is_present(v) {
-                continue;
-            }
-            assert!(g.get_direct(u, v).is_finite());
-        }
-    }
+    // Rules from "Böcker et al., Exact Algorithms for Cluster Editing: Evaluation and
+    // Experiments", 2011
+    let (g, imap, edits) = apply_reduction_rules(g.clone(), imap.clone());
 
     // TODO: If we never end up getting a parameter-independent reduction that produces edits,
     // remove that return value.
-    (g, imap, Vec::new(), k_start)
+    (g, imap, edits, k_start)
+}
+
+fn apply_reduction_rules(mut g: Graph, mut imap: IndexMap) -> (Graph, IndexMap, Vec<Edit>) {
+    let mut edits = Vec::new();
+
+    // TODO: Optimize these! This is a super naive implementation, even the paper directly
+    // describes a better strategy for doing it.
+
+    let mut applied_any_rule = true;
+    while applied_any_rule {
+        applied_any_rule = false;
+
+        // Rule 1 (heavy non-edge rule)
+        for u in 0..g.size() {
+            continue_if_not_present!(g, u);
+            for v in 0..g.size() {
+                if u == v {
+                    continue;
+                }
+                continue_if_not_present!(g, v);
+
+                let uv = g.get(u, v);
+                if uv >= 0.0 || !uv.is_finite() {
+                    continue;
+                }
+
+                let sum = g.neighbors(u).map(|w| g.get(u, w)).sum();
+                if -uv >= sum {
+                    g.set(u, v, f32::NEG_INFINITY);
+                    applied_any_rule = true;
+                }
+            }
+        }
+
+        // Rule 2 (heavy edge rule, single end)
+        for u in 0..g.size() {
+            continue_if_not_present!(g, u);
+            for v in 0..g.size() {
+                if u == v {
+                    continue;
+                }
+                continue_if_not_present!(g, v);
+
+                let uv = g.get(u, v);
+                if uv <= 0.0 {
+                    continue;
+                }
+
+                let sum = g
+                    .nodes()
+                    .filter_map(|w| {
+                        if u == w || v == w {
+                            None
+                        } else {
+                            Some(g.get(u, w).abs())
+                        }
+                    })
+                    .sum();
+
+                if uv >= sum {
+                    merge(&mut g, &mut imap, &mut 0.0, &mut edits, u, v);
+                    applied_any_rule = true;
+                }
+            }
+        }
+
+        // Rule 3 (heavy edge rule, both ends)
+        for u in 0..g.size() {
+            continue_if_not_present!(g, u);
+            // This rule is already "symmetric" so we only go through pairs in one order, not
+            // either order.
+            for v in (u + 1)..g.size() {
+                continue_if_not_present!(g, v);
+
+                let uv = g.get_direct(u, v);
+                if uv <= 0.0 {
+                    continue;
+                }
+
+                let sum = g
+                    .neighbors(u)
+                    .map(|w| if w == v { 0.0 } else { g.get(u, w) })
+                    .sum::<f32>()
+                    + g.neighbors(v)
+                        .map(|w| if w == u { 0.0 } else { g.get(v, w) })
+                        .sum::<f32>();
+
+                if uv >= sum {
+                    merge(&mut g, &mut imap, &mut 0.0, &mut edits, u, v);
+                    applied_any_rule = true;
+                }
+            }
+        }
+
+        // TODO: Think through if this doesn't do weird things if we already set some non-edges to
+        // NEG_INFINITY
+        // TODO: Comment this stuff (including MinCut) and probably clean it up a bit ^^'
+
+        // Rule 4
+        if g.present_node_count() <= 1 {
+            break;
+        }
+
+        let mut c = HashSet::new();
+        // Choose initial u
+        let first = g
+            .nodes()
+            .fold((usize::MAX, f32::NEG_INFINITY), |(max_u, max), u| {
+                let val = g
+                    .nodes()
+                    .map(|v| if u == v { 0.0 } else { g.get(u, v).abs() })
+                    .sum::<f32>();
+                if val > max {
+                    (u, val)
+                } else {
+                    (max_u, max)
+                }
+            })
+            .0;
+        c.insert(first);
+
+        loop {
+            let mut max = (usize::MAX, f32::NEG_INFINITY, 0); // (vertex, connectivity, count of connected vertices in c)
+            let mut second = (usize::MAX, f32::NEG_INFINITY);
+
+            let mut iter_count = 0;
+            for w in g.nodes() {
+                if c.contains(&w) {
+                    continue;
+                }
+                iter_count += 1;
+                let (sum, connected_count) = c.iter().fold((0.0, 0), |(sum, mut count), &v| {
+                    let vw = g.get(v, w);
+                    if vw > 0.0 {
+                        count += 1;
+                    }
+                    (sum + vw, count)
+                });
+                if sum > max.1 {
+                    second = (max.0, max.1);
+                    max = (w, sum, connected_count);
+                } else if sum > second.1 {
+                    second = (w, sum);
+                }
+            }
+
+            if max.1 < 0.0 && max.1.is_infinite() {
+                // Didn't find anything to add.
+                break;
+            }
+
+            let w = max.0;
+            c.insert(w);
+
+            if max.1 > second.1 * 2.0 {
+                let k_c = min_cut(&g, &c, first);
+
+                let sum_neg_internal = c
+                    .iter()
+                    .map(|&u| {
+                        c.iter()
+                            .map(|&v| {
+                                if u != v {
+                                    g.get(u, v).max(0.0).abs()
+                                } else {
+                                    0.0
+                                }
+                            })
+                            .sum::<f32>()
+                    })
+                    .sum::<f32>();
+
+                let sum_pos_crossing = c
+                    .iter()
+                    .map(|&u| {
+                        g.nodes()
+                            .filter(|v| !c.contains(v))
+                            .map(|v| g.get(u, v).min(0.0))
+                            .sum::<f32>()
+                    })
+                    .sum::<f32>();
+
+                if k_c > sum_neg_internal + sum_pos_crossing {
+                    let mut nodes = c.into_iter();
+                    let first = nodes.next().unwrap();
+                    for v in nodes {
+                        merge(&mut g, &mut imap, &mut 0.0, &mut edits, first, v);
+                    }
+                    applied_any_rule = true;
+                    break;
+                }
+            }
+
+            let connected_count_outside = g
+                .nodes()
+                .filter(|v| !c.contains(v))
+                .filter(|&v| g.get(v, w) > 0.0)
+                .count();
+
+            if connected_count_outside > max.2 {
+                break;
+            }
+        }
+    }
+
+    // TODO: It would seem that merging steps above could potentially result in zero-edges in the
+    // graph. The algorithm is generally described as requiring that *no* zero-edges are in the
+    // input, so doesn't this pose a problem?
+    // For now, this checks if we do ever produce any zero-edges and logs an error if so.
+    for u in 0..g.size() {
+        continue_if_not_present!(g, u);
+        for v in g.neighbors(u) {
+            if g.get(u, v).abs() <= 0.001 {
+                log::error!("Produced a zero-edge during parameter-independent reduction!");
+            }
+        }
+    }
+
+    // TODO: Consider condensing the Graph after this (i.e. produce a smaller-sized graph that only
+    // contains the vertices that are still "present" in g)
+    (g, imap, edits)
+}
+
+fn min_cut(g: &Graph, c: &HashSet<usize>, a: usize) -> f32 {
+    let mut g = g.clone();
+    let mut c = c.clone();
+
+    fn merge_mc(g: &mut Graph, c: &mut HashSet<usize>, u: usize, v: usize) {
+        for &w in c.iter() {
+            if w == u || w == v {
+                continue;
+            }
+            let uw = g.get(u, w);
+            let vw = g.get(v, w);
+            if uw + vw > 0.0 {
+                g.set(u, w, uw + vw);
+            }
+        }
+        g.set_present(v, false);
+        c.remove(&v);
+    }
+
+    fn min_cut_phase(g: &mut Graph, c: &mut HashSet<usize>, a: usize) -> f32 {
+        let mut set = HashSet::new();
+        set.insert(a);
+        let mut last_two = (a, 0);
+        while &set != c {
+            let mut best = (0, f32::NEG_INFINITY);
+            for &y in c.iter() {
+                if set.contains(&y) {
+                    continue;
+                }
+
+                let sum = set.iter().map(|&x| g.get(x, y).abs()).sum();
+                if sum > best.1 {
+                    best = (y, sum);
+                }
+            }
+
+            set.insert(best.0);
+            last_two = (best.0, last_two.0);
+        }
+
+        let (t, s) = last_two;
+        let cut_weight = c.iter().filter(|&&v| v != t).map(|&v| g.get(t, v)).sum();
+
+        merge_mc(g, c, s, t);
+        cut_weight
+    }
+
+    let mut best = f32::INFINITY;
+    while c.len() > 1 {
+        let cut_weight = min_cut_phase(&mut g, &mut c, a);
+        if cut_weight < best {
+            best = cut_weight;
+        }
+    }
+
+    best
 }
 
 /*

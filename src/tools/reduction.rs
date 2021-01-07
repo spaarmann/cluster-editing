@@ -19,7 +19,7 @@ struct Opt {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     let opt = Opt::from_args();
 
     println!(
@@ -42,6 +42,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         let before = graph.size();
         let mut after = 0;
+
+        info!("Starting reduction on {}", filename);
 
         for c in components.into_iter() {
             let (cg, imap) = c;
