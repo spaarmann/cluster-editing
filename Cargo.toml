@@ -11,8 +11,14 @@ default-run = "cluster-editing"
 env_logger = "0.8.2"
 log = "0.4.11"
 petgraph = "0.5.1"
+rayon = "1.5.0"
 structopt = "0.3.21"
+wait-timeout = "0.2.0"
 
 [[bin]]
 name = "reduction"
 path = "src/tools/reduction.rs"
+
+[[bin]]
+name = "runner"
+path = "src/tools/runner.rs"

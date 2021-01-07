@@ -4,7 +4,6 @@ use std::error::Error;
 use std::path::PathBuf;
 
 use log::info;
-use petgraph::prelude::*;
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -60,67 +59,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         graphviz::print_graph(&opt.print_command, path, &graph);
     }
 
-    let mut result = graph.clone();
-
-    let (graph, imap) = Graph::new_from_petgraph(&graph);
-
     if let Some(path) = opt.print_cliques {
+        let (graph, _) = Graph::new_from_petgraph(&graph);
         let crit_graph = cluster_editing::critical_cliques::build_crit_clique_graph(&graph);
         graphviz::print_graph(&opt.print_command, path, &crit_graph.into_petgraph());
     }
 
-    let (components, _) = graph.split_into_components(&imap);
-
-    info!(
-        "Decomposed input graph into {} components",
-        components.len()
-    );
-
-    for (i, c) in components.into_iter().enumerate() {
-        info!("Solving component {}...", i);
-        let (cg, imap) = c;
-        let (k, edits) = algo::find_optimal_cluster_editing(&cg);
-
-        // TODO: The algorithm can produce "overlapping" edits. It might e.g. have a "delete(uv)"
-        // edit followed later by an "insert(uv)" edit. This is handled correctly below when
-        // computing the output graph, but ignored when outputting the edit set.
-
-        use algo::Edit;
-        info!(
-            "Found a cluster editing with k={} and {} edits for component {}: {:?}",
-            k,
-            edits.len(),
-            i,
-            edits
-                .iter()
-                .map(|e| match e {
-                    Edit::Insert(u, v) => Edit::Insert(imap[*u][0], imap[*v][0]),
-                    Edit::Delete(u, v) => Edit::Delete(imap[*u][0], imap[*v][0]),
-                })
-                .collect::<Vec<_>>()
-        );
-
-        for edit in edits {
-            match edit {
-                algo::Edit::Insert(u, v) => {
-                    // This imap is only for mapping from components to the full graph, so each
-                    // entry only contains a single vertex.
-                    if let None =
-                        result.find_edge(NodeIndex::new(imap[u][0]), NodeIndex::new(imap[v][0]))
-                    {
-                        result.add_edge(NodeIndex::new(imap[u][0]), NodeIndex::new(imap[v][0]), 0);
-                    }
-                }
-                algo::Edit::Delete(u, v) => {
-                    if let Some(e) =
-                        result.find_edge(NodeIndex::new(imap[u][0]), NodeIndex::new(imap[v][0]))
-                    {
-                        result.remove_edge(e);
-                    }
-                }
-            };
-        }
-    }
+    let result = algo::execute_algorithm(&graph);
 
     info!(
         "Output graph has {} nodes and {} edges.",

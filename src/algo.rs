@@ -1,8 +1,9 @@
-use crate::{critical_cliques, graph::IndexMap, Graph};
+use crate::{critical_cliques, graph::IndexMap, Graph, PetGraph};
 
 use std::collections::HashSet;
 
 use log::info;
+use petgraph::graph::NodeIndex;
 
 #[derive(Copy, Clone, Debug)]
 pub enum Edit {
@@ -54,6 +55,64 @@ macro_rules! continue_if_not_present {
             continue;
         }
     };
+}
+
+pub fn execute_algorithm(graph: &PetGraph) -> PetGraph {
+    let mut result = graph.clone();
+    let (graph, imap) = Graph::new_from_petgraph(&graph);
+    let (components, _) = graph.split_into_components(&imap);
+
+    info!(
+        "Decomposed input graph into {} components",
+        components.len()
+    );
+
+    for (i, c) in components.into_iter().enumerate() {
+        info!("Solving component {}...", i);
+        let (cg, imap) = c;
+        let (k, edits) = find_optimal_cluster_editing(&cg);
+
+        // TODO: The algorithm can produce "overlapping" edits. It might e.g. have a "delete(uv)"
+        // edit followed later by an "insert(uv)" edit. This is handled correctly below when
+        // computing the output graph, but ignored when outputting the edit set.
+
+        info!(
+            "Found a cluster editing with k={} and {} edits for component {}: {:?}",
+            k,
+            edits.len(),
+            i,
+            edits
+                .iter()
+                .map(|e| match e {
+                    Edit::Insert(u, v) => Edit::Insert(imap[*u][0], imap[*v][0]),
+                    Edit::Delete(u, v) => Edit::Delete(imap[*u][0], imap[*v][0]),
+                })
+                .collect::<Vec<_>>()
+        );
+
+        for edit in edits {
+            match edit {
+                Edit::Insert(u, v) => {
+                    // This imap is only for mapping from components to the full graph, so each
+                    // entry only contains a single vertex.
+                    if let None =
+                        result.find_edge(NodeIndex::new(imap[u][0]), NodeIndex::new(imap[v][0]))
+                    {
+                        result.add_edge(NodeIndex::new(imap[u][0]), NodeIndex::new(imap[v][0]), 0);
+                    }
+                }
+                Edit::Delete(u, v) => {
+                    if let Some(e) =
+                        result.find_edge(NodeIndex::new(imap[u][0]), NodeIndex::new(imap[v][0]))
+                    {
+                        result.remove_edge(e);
+                    }
+                }
+            };
+        }
+    }
+
+    result
 }
 
 pub fn find_optimal_cluster_editing(g: &Graph) -> (i32, Vec<Edit>) {
@@ -578,12 +637,10 @@ fn apply_reduction_rules(mut g: Graph, mut imap: IndexMap) -> (Graph, IndexMap, 
             let mut max = (usize::MAX, f32::NEG_INFINITY, 0); // (vertex, connectivity, count of connected vertices in c)
             let mut second = (usize::MAX, f32::NEG_INFINITY);
 
-            let mut iter_count = 0;
             for w in g.nodes() {
                 if c.contains(&w) {
                     continue;
                 }
-                iter_count += 1;
                 let (sum, connected_count) = c.iter().fold((0.0, 0), |(sum, mut count), &v| {
                     let vw = g.get(v, w);
                     if vw > 0.0 {
