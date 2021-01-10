@@ -17,7 +17,7 @@ pub struct Graph {
     /// x | d e f -
     /// ```
     /// This would be stored as `[a, b, c, d, e, f]` in the `matrix` field.
-    matrix: Vec<f32>,
+    matrix: Vec<i32>,
     /// The data structure is treated as very fixed-size at the moment, but on order to efficiently
     /// merge vertices in the algorithm, it is possible to mark vertices as "removed"/not-present.
     /// Such vertices will not be returned as part of any neighbor-sets etc. Accessing the weight
@@ -46,14 +46,14 @@ impl Graph {
             .collect();
         Graph {
             size,
-            matrix: vec![-1.0; mat_size],
+            matrix: vec![-1; mat_size],
             present: vec![true; size],
             row_offsets,
         }
     }
 
     /// Creates a new graph from an existing petgraph graph. Edges existing in the input graph are
-    /// given weight 1.0, non-edges are given weight -1.0.
+    /// given weight 1, non-edges are given weight -1.
     /// A corresponding `IndexMap` is created that maps vertex indices from the returned graph to
     /// the weights associated with the vertices in the petgraph graph.
     pub fn new_from_petgraph(pg: &crate::PetGraph) -> (Self, IndexMap) {
@@ -66,7 +66,7 @@ impl Graph {
 
         for e in pg.edge_indices() {
             let (u, v) = pg.edge_endpoints(e).unwrap();
-            g.set(u.index(), v.index(), 1.0);
+            g.set(u.index(), v.index(), 1);
         }
 
         (g, imap)
@@ -91,7 +91,7 @@ impl Graph {
             if self.present[u] {
                 for v in (u + 1)..self.size {
                     if self.present[v] {
-                        if self.get_direct(u, v) > 0.0 {
+                        if self.get_direct(u, v) > 0 {
                             pg.add_edge(map[u], map[v], 0);
                         }
                     }
@@ -104,7 +104,7 @@ impl Graph {
 
     /// Get the weight associated with pair `(u, v)`.
     /// u and v can be in any order, panics if `u == v`.
-    pub fn get(&self, u: usize, v: usize) -> f32 {
+    pub fn get(&self, u: usize, v: usize) -> i32 {
         debug_assert!(self.present[u]);
         debug_assert!(self.present[v]);
         assert_ne!(u, v);
@@ -118,7 +118,7 @@ impl Graph {
 
     /// Get the weight associated with pair `(u, v)`.
     /// u and v can be in any order, panics if `u == v`.
-    pub fn get_ref(&self, u: usize, v: usize) -> &f32 {
+    pub fn get_ref(&self, u: usize, v: usize) -> &i32 {
         debug_assert!(self.present[u]);
         debug_assert!(self.present[v]);
         assert_ne!(u, v);
@@ -132,7 +132,7 @@ impl Graph {
 
     /// Get a mutable reference to the weight associated with pair `(u, v)`.
     /// u and v can be in any order, panics if `u == v`.
-    pub fn get_mut(&mut self, u: usize, v: usize) -> &mut f32 {
+    pub fn get_mut(&mut self, u: usize, v: usize) -> &mut i32 {
         debug_assert!(self.present[u]);
         debug_assert!(self.present[v]);
         assert_ne!(u, v);
@@ -146,7 +146,7 @@ impl Graph {
 
     /// Set the weight associated with pair `(u, v)`.
     /// u and v can be in any order, panics if `u == v`.
-    pub fn set(&mut self, u: usize, v: usize, w: f32) {
+    pub fn set(&mut self, u: usize, v: usize, w: i32) {
         debug_assert!(self.present[u]);
         debug_assert!(self.present[v]);
         assert_ne!(u, v);
@@ -159,25 +159,25 @@ impl Graph {
     }
 
     /// Like `get`, but assumes `u != v` and `u < v` instead of checking both.
-    pub fn get_direct(&self, u: usize, v: usize) -> f32 {
+    pub fn get_direct(&self, u: usize, v: usize) -> i32 {
         debug_assert!(self.present[u]);
         debug_assert!(self.present[v]);
         self.matrix[self.row_offsets[v] + u]
     }
     /// Like `get_ref`, but assumes `u != v` and `u < v` instead of checking both.
-    pub fn get_ref_direct(&self, u: usize, v: usize) -> &f32 {
+    pub fn get_ref_direct(&self, u: usize, v: usize) -> &i32 {
         debug_assert!(self.present[u]);
         debug_assert!(self.present[v]);
         &self.matrix[self.row_offsets[v] + u]
     }
     /// Like `get_mut`, but assumes `u != v` and `u < v` instead of checking both.
-    pub fn get_mut_direct(&mut self, u: usize, v: usize) -> &mut f32 {
+    pub fn get_mut_direct(&mut self, u: usize, v: usize) -> &mut i32 {
         debug_assert!(self.present[u]);
         debug_assert!(self.present[v]);
         &mut self.matrix[self.row_offsets[v] + u]
     }
     /// Like `set`, but assumes `u != v` and `u < v` instead of checking both.
-    pub fn set_direct(&mut self, u: usize, v: usize, w: f32) {
+    pub fn set_direct(&mut self, u: usize, v: usize, w: i32) {
         debug_assert!(self.present[u]);
         debug_assert!(self.present[v]);
         self.matrix[self.row_offsets[v] + u] = w;
@@ -188,10 +188,9 @@ impl Graph {
     pub fn neighbors(&self, u: usize) -> impl Iterator<Item = usize> + '_ {
         debug_assert!(self.present[u]);
         (0..u)
-            .filter(move |&v| self.present[v] && self.get_direct(v, u) > 0.0)
+            .filter(move |&v| self.present[v] && self.get_direct(v, u) > 0)
             .chain(
-                ((u + 1)..self.size)
-                    .filter(move |&v| self.present[v] && self.get_direct(u, v) > 0.0),
+                ((u + 1)..self.size).filter(move |&v| self.present[v] && self.get_direct(u, v) > 0),
             )
     }
 
@@ -200,11 +199,10 @@ impl Graph {
     pub fn closed_neighbors(&self, u: usize) -> impl Iterator<Item = usize> + '_ {
         debug_assert!(self.present[u]);
         (0..u)
-            .filter(move |&v| self.present[v] && self.get_direct(v, u) > 0.0)
+            .filter(move |&v| self.present[v] && self.get_direct(v, u) > 0)
             .chain(std::iter::once(u))
             .chain(
-                ((u + 1)..self.size)
-                    .filter(move |&v| self.present[v] && self.get_direct(u, v) > 0.0),
+                ((u + 1)..self.size).filter(move |&v| self.present[v] && self.get_direct(u, v) > 0),
             )
     }
 
@@ -226,13 +224,13 @@ impl Graph {
     pub fn has_edge(&self, u: usize, v: usize) -> bool {
         debug_assert!(self.present[u]);
         debug_assert!(self.present[v]);
-        self.get(u, v) > 0.0
+        self.get(u, v) > 0
     }
 
     pub fn has_edge_direct(&self, u: usize, v: usize) -> bool {
         debug_assert!(self.present[u]);
         debug_assert!(self.present[v]);
-        self.get_direct(u, v) > 0.0
+        self.get_direct(u, v) > 0
     }
 
     pub fn is_present(&self, u: usize) -> bool {
@@ -301,7 +299,7 @@ impl Graph {
 }
 
 impl std::ops::Index<(usize, usize)> for Graph {
-    type Output = f32;
+    type Output = i32;
     /// Semantics equivalent to `Graph::get_ref`.
     fn index(&self, (u, v): (usize, usize)) -> &Self::Output {
         self.get_ref(u, v)
@@ -393,9 +391,9 @@ mod tests {
         // 2    3
 
         let mut g = Graph::new(4);
-        g.set(0, 1, 1.0);
-        g.set(0, 2, 1.0);
-        g.set(1, 3, 1.0);
+        g.set(0, 1, 1);
+        g.set(0, 2, 1);
+        g.set(1, 3, 1);
         g
     }
 

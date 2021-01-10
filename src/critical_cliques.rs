@@ -29,7 +29,7 @@ impl CritCliqueGraph {
 
         for u in 0..self.graph.size() {
             for v in (u + 1)..self.graph.size() {
-                if self.graph.get_direct(u, v) > 0.0 {
+                if self.graph.get_direct(u, v) > 0 {
                     pg.add_edge(NodeIndex::new(u), NodeIndex::new(v), 0);
                 }
             }
@@ -82,7 +82,7 @@ pub fn build_crit_clique_graph(g: &Graph) -> CritCliqueGraph {
             }
 
             if should_be_neighbors(g, &cliques[c1], &cliques[c2]) {
-                crit_graph.set(c1, c2, 1.0);
+                crit_graph.set(c1, c2, 1);
             }
         }
     }
@@ -119,7 +119,7 @@ pub fn merge_cliques(g: &Graph, imap: &IndexMap) -> (Graph, IndexMap) {
             let uv = crit.graph.get_mut_direct(u, v);
             let sign = uv.signum();
             let weight = crit.cliques[u].vertices.len() * crit.cliques[v].vertices.len();
-            *uv = (weight as f32).copysign(sign);
+            *uv = (weight as i32) * sign;
         }
 
         crit_imap.set(
@@ -581,19 +581,19 @@ mod tests {
         // editing, 2009", Fig. 1
 
         let mut graph = Graph::new(9);
-        graph.set(0, 1, 1.0);
-        graph.set(0, 2, 1.0);
-        graph.set(1, 2, 1.0);
-        graph.set(2, 3, 1.0);
-        graph.set(2, 4, 1.0);
-        graph.set(3, 4, 1.0);
-        graph.set(3, 5, 1.0);
-        graph.set(3, 6, 1.0);
-        graph.set(4, 5, 1.0);
-        graph.set(4, 6, 1.0);
-        graph.set(5, 6, 1.0);
-        graph.set(5, 7, 1.0);
-        graph.set(5, 8, 1.0);
+        graph.set(0, 1, 1);
+        graph.set(0, 2, 1);
+        graph.set(1, 2, 1);
+        graph.set(2, 3, 1);
+        graph.set(2, 4, 1);
+        graph.set(3, 4, 1);
+        graph.set(3, 5, 1);
+        graph.set(3, 6, 1);
+        graph.set(4, 5, 1);
+        graph.set(4, 6, 1);
+        graph.set(5, 6, 1);
+        graph.set(5, 7, 1);
+        graph.set(5, 8, 1);
 
         let crit = build_crit_clique_graph(&graph);
 

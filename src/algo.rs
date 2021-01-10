@@ -29,6 +29,27 @@ impl Edit {
     }
 }
 
+/// We want to semantically treat some edge weights as positive or negative infinity. Since we're
+/// using integers as edge weights, which don't support any "infinity" concept out of the box, we
+/// approximate it by using large threshold values.
+trait InfiniteNum {
+    const INFINITY: Self;
+    const NEG_INFINITY: Self;
+    fn is_finite(self) -> bool;
+    fn is_infinite(self) -> bool;
+}
+
+impl InfiniteNum for i32 {
+    const INFINITY: Self = 100000000;
+    const NEG_INFINITY: Self = -100000000;
+    fn is_finite(self) -> bool {
+        self < Self::INFINITY && self > Self::NEG_INFINITY
+    }
+    fn is_infinite(self) -> bool {
+        self >= Self::INFINITY || self <= Self::NEG_INFINITY
+    }
+}
+
 macro_rules! dbg_trace_indent {
     ($k:expr, $s:expr) => (
         #[cfg(not(release))]
@@ -59,8 +80,8 @@ macro_rules! continue_if_not_present {
 
 pub fn execute_algorithm(graph: &PetGraph) -> PetGraph {
     let mut result = graph.clone();
-    let (graph, imap) = Graph::new_from_petgraph(&graph);
-    let (components, _) = graph.split_into_components(&imap);
+    let (g, imap) = Graph::new_from_petgraph(&graph);
+    let (components, _) = g.split_into_components(&imap);
 
     info!(
         "Decomposed input graph into {} components",
@@ -112,6 +133,39 @@ pub fn execute_algorithm(graph: &PetGraph) -> PetGraph {
         }
     }
 
+    // Find and print the actual diff of the graphs, in terms of the vertex indices of the original input
+    let mut edits = Vec::new();
+    for u in graph.node_indices() {
+        for v in graph.node_indices() {
+            if u == v {
+                continue;
+            }
+            if v > u {
+                continue;
+            }
+
+            let original = graph.find_edge(u, v);
+            let new = result.find_edge(u, v);
+
+            match (original, new) {
+                (None, Some(_)) => edits.push(Edit::Insert(
+                    *graph.node_weight(u).unwrap(),
+                    *graph.node_weight(v).unwrap(),
+                )),
+                (Some(_), None) => edits.push(Edit::Delete(
+                    *graph.node_weight(u).unwrap(),
+                    *graph.node_weight(v).unwrap(),
+                )),
+                _ => { /* no edit */ }
+            }
+        }
+    }
+
+    info!(
+        "Final set of {} de-duplicated edits: {:?}",
+        edits.len(),
+        edits
+    );
     result
 }
 
@@ -212,7 +266,7 @@ fn find_cluster_editing(
                 for v in (u + 1)..g.size() {
                     continue_if_not_present!(g, v);
                     if component_map[u] != component_map[v] {
-                        if g.get_direct(u, v).abs() < 0.001 {
+                        if g.get_direct(u, v) == 0 {
                             zero_count += 1.0;
                         }
                     }
@@ -274,7 +328,7 @@ fn find_cluster_editing(
                 continue_if_not_present!(g, u);
                 for v in (u + 1)..g.size() {
                     continue_if_not_present!(g, v);
-                    if g.get_direct(u, v).abs() < 0.001 {
+                    if g.get_direct(u, v) == 0 {
                         zero_count += 1.0;
                     }
                 }
@@ -306,7 +360,7 @@ fn find_cluster_editing(
         // TODO: Might not need this check after edge merging is in? Maybe?
         if uv.is_finite() {
             let _k_before = k;
-            let k = k - *uv;
+            let k = k - *uv as f32;
             if k >= 0.0 {
                 dbg_trace_indent!(
                     _k_before,
@@ -317,7 +371,7 @@ fn find_cluster_editing(
                 );
 
                 Edit::delete(&mut edits, &imap, u, v);
-                *uv = f32::NEG_INFINITY;
+                *uv = InfiniteNum::NEG_INFINITY;
 
                 find_cluster_editing(g, imap, edits, k)
             } else {
@@ -405,12 +459,12 @@ fn merge(
         let uw = g.get(u, w);
         let vw = g.get(v, w);
 
-        if uw > 0.0 {
-            if vw < 0.0 {
+        if uw > 0 {
+            if vw < 0 {
                 // (+, -)
                 let new_weight = merge_nonmatching_nonzero(g, imap, k, edits, u, v, w);
                 g.set(u, w, new_weight);
-            } else if vw > 0.0 {
+            } else if vw > 0 {
                 // (+, +)
                 g.set(u, w, uw + vw);
             } else {
@@ -418,11 +472,11 @@ fn merge(
                 *k -= 0.5;
                 Edit::insert(edits, imap, v, w);
             }
-        } else if uw < 0.0 {
-            if vw < 0.0 {
+        } else if uw < 0 {
+            if vw < 0 {
                 // (-, -)
                 g.set(u, w, uw + vw);
-            } else if vw > 0.0 {
+            } else if vw > 0 {
                 // (-, +)
                 let new_weight = merge_nonmatching_nonzero(g, imap, k, edits, v, u, w);
                 g.set(u, w, new_weight);
@@ -431,11 +485,11 @@ fn merge(
                 *k -= 0.5;
             }
         } else {
-            if vw < 0.0 {
+            if vw < 0 {
                 // (0, -)
                 *k -= 0.5;
                 g.set(u, w, vw);
-            } else if vw > 0.0 {
+            } else if vw > 0 {
                 // (0, +)
                 *k -= 0.5;
                 g.set(u, w, vw);
@@ -473,20 +527,20 @@ fn merge_nonmatching_nonzero(
     u: usize,
     v: usize,
     w: usize,
-) -> f32 {
+) -> i32 {
     let uw = g.get(u, w);
     let vw = g.get(v, w);
 
-    if (uw + vw).abs() < 0.001 {
-        *k -= uw - 0.5;
+    if uw + vw == 0 {
+        *k -= uw as f32 - 0.5;
         Edit::delete(edits, imap, u, w);
-        return 0.0;
+        return 0;
     } else {
         if uw > -vw {
-            *k -= -vw;
+            *k -= -vw as f32;
             Edit::insert(edits, imap, v, w);
         } else {
-            *k -= uw;
+            *k -= uw as f32;
             Edit::delete(edits, imap, u, w);
         }
         return uw + vw;
@@ -534,13 +588,13 @@ fn apply_reduction_rules(mut g: Graph, mut imap: IndexMap) -> (Graph, IndexMap, 
                 continue_if_not_present!(g, v);
 
                 let uv = g.get(u, v);
-                if uv >= 0.0 || !uv.is_finite() {
+                if uv >= 0 || !uv.is_finite() {
                     continue;
                 }
 
                 let sum = g.neighbors(u).map(|w| g.get(u, w)).sum();
                 if -uv >= sum {
-                    g.set(u, v, f32::NEG_INFINITY);
+                    g.set(u, v, InfiniteNum::NEG_INFINITY);
                     applied_any_rule = true;
                 }
             }
@@ -556,7 +610,7 @@ fn apply_reduction_rules(mut g: Graph, mut imap: IndexMap) -> (Graph, IndexMap, 
                 continue_if_not_present!(g, v);
 
                 let uv = g.get(u, v);
-                if uv <= 0.0 {
+                if uv <= 0 {
                     continue;
                 }
 
@@ -587,17 +641,17 @@ fn apply_reduction_rules(mut g: Graph, mut imap: IndexMap) -> (Graph, IndexMap, 
                 continue_if_not_present!(g, v);
 
                 let uv = g.get_direct(u, v);
-                if uv <= 0.0 {
+                if uv <= 0 {
                     continue;
                 }
 
                 let sum = g
                     .neighbors(u)
-                    .map(|w| if w == v { 0.0 } else { g.get(u, w) })
-                    .sum::<f32>()
+                    .map(|w| if w == v { 0 } else { g.get(u, w) })
+                    .sum::<i32>()
                     + g.neighbors(v)
-                        .map(|w| if w == u { 0.0 } else { g.get(v, w) })
-                        .sum::<f32>();
+                        .map(|w| if w == u { 0 } else { g.get(v, w) })
+                        .sum::<i32>();
 
                 if uv >= sum {
                     merge(&mut g, &mut imap, &mut 0.0, &mut edits, u, v);
@@ -619,31 +673,34 @@ fn apply_reduction_rules(mut g: Graph, mut imap: IndexMap) -> (Graph, IndexMap, 
         // Choose initial u
         let first = g
             .nodes()
-            .fold((usize::MAX, f32::NEG_INFINITY), |(max_u, max), u| {
-                let val = g
-                    .nodes()
-                    .map(|v| if u == v { 0.0 } else { g.get(u, v).abs() })
-                    .sum::<f32>();
-                if val > max {
-                    (u, val)
-                } else {
-                    (max_u, max)
-                }
-            })
+            .fold(
+                (usize::MAX, InfiniteNum::NEG_INFINITY),
+                |(max_u, max), u| {
+                    let val = g
+                        .nodes()
+                        .map(|v| if u == v { 0 } else { g.get(u, v).abs() })
+                        .sum::<i32>();
+                    if val > max {
+                        (u, val)
+                    } else {
+                        (max_u, max)
+                    }
+                },
+            )
             .0;
         c.insert(first);
 
         loop {
-            let mut max = (usize::MAX, f32::NEG_INFINITY, 0); // (vertex, connectivity, count of connected vertices in c)
-            let mut second = (usize::MAX, f32::NEG_INFINITY);
+            let mut max = (usize::MAX, InfiniteNum::NEG_INFINITY, 0); // (vertex, connectivity, count of connected vertices in c)
+            let mut second = (usize::MAX, InfiniteNum::NEG_INFINITY);
 
             for w in g.nodes() {
                 if c.contains(&w) {
                     continue;
                 }
-                let (sum, connected_count) = c.iter().fold((0.0, 0), |(sum, mut count), &v| {
+                let (sum, connected_count) = c.iter().fold((0, 0), |(sum, mut count), &v| {
                     let vw = g.get(v, w);
-                    if vw > 0.0 {
+                    if vw > 0 {
                         count += 1;
                     }
                     (sum + vw, count)
@@ -656,7 +713,7 @@ fn apply_reduction_rules(mut g: Graph, mut imap: IndexMap) -> (Graph, IndexMap, 
                 }
             }
 
-            if max.1 < 0.0 && max.1.is_infinite() {
+            if max.1 < 0 && max.1.is_infinite() {
                 // Didn't find anything to add.
                 break;
             }
@@ -664,33 +721,27 @@ fn apply_reduction_rules(mut g: Graph, mut imap: IndexMap) -> (Graph, IndexMap, 
             let w = max.0;
             c.insert(w);
 
-            if max.1 > second.1 * 2.0 {
+            if max.1 > second.1 * 2 {
                 let k_c = min_cut(&g, &c, first);
 
                 let sum_neg_internal = c
                     .iter()
                     .map(|&u| {
                         c.iter()
-                            .map(|&v| {
-                                if u != v {
-                                    g.get(u, v).max(0.0).abs()
-                                } else {
-                                    0.0
-                                }
-                            })
-                            .sum::<f32>()
+                            .map(|&v| if u != v { g.get(u, v).max(0).abs() } else { 0 })
+                            .sum::<i32>()
                     })
-                    .sum::<f32>();
+                    .sum::<i32>();
 
                 let sum_pos_crossing = c
                     .iter()
                     .map(|&u| {
                         g.nodes()
                             .filter(|v| !c.contains(v))
-                            .map(|v| g.get(u, v).min(0.0))
-                            .sum::<f32>()
+                            .map(|v| g.get(u, v).min(0))
+                            .sum::<i32>()
                     })
-                    .sum::<f32>();
+                    .sum::<i32>();
 
                 if k_c > sum_neg_internal + sum_pos_crossing {
                     let mut nodes = c.into_iter();
@@ -706,13 +757,20 @@ fn apply_reduction_rules(mut g: Graph, mut imap: IndexMap) -> (Graph, IndexMap, 
             let connected_count_outside = g
                 .nodes()
                 .filter(|v| !c.contains(v))
-                .filter(|&v| g.get(v, w) > 0.0)
+                .filter(|&v| g.get(v, w) > 0)
                 .count();
 
             if connected_count_outside > max.2 {
                 break;
             }
         }
+
+        // Try Rule 5 only if no other rules could be applied
+        if applied_any_rule {
+            continue;
+        }
+
+        // Rule 5
     }
 
     // TODO: It would seem that merging steps above could potentially result in zero-edges in the
@@ -722,7 +780,7 @@ fn apply_reduction_rules(mut g: Graph, mut imap: IndexMap) -> (Graph, IndexMap, 
     for u in 0..g.size() {
         continue_if_not_present!(g, u);
         for v in g.neighbors(u) {
-            if g.get(u, v).abs() <= 0.001 {
+            if g.get(u, v) == 0 {
                 log::error!("Produced a zero-edge during parameter-independent reduction!");
             }
         }
@@ -733,7 +791,7 @@ fn apply_reduction_rules(mut g: Graph, mut imap: IndexMap) -> (Graph, IndexMap, 
     (g, imap, edits)
 }
 
-fn min_cut(g: &Graph, c: &HashSet<usize>, a: usize) -> f32 {
+fn min_cut(g: &Graph, c: &HashSet<usize>, a: usize) -> i32 {
     let mut g = g.clone();
     let mut c = c.clone();
 
@@ -744,7 +802,7 @@ fn min_cut(g: &Graph, c: &HashSet<usize>, a: usize) -> f32 {
             }
             let uw = g.get(u, w);
             let vw = g.get(v, w);
-            if uw + vw > 0.0 {
+            if uw + vw > 0 {
                 g.set(u, w, uw + vw);
             }
         }
@@ -752,18 +810,18 @@ fn min_cut(g: &Graph, c: &HashSet<usize>, a: usize) -> f32 {
         c.remove(&v);
     }
 
-    fn min_cut_phase(g: &mut Graph, c: &mut HashSet<usize>, a: usize) -> f32 {
+    fn min_cut_phase(g: &mut Graph, c: &mut HashSet<usize>, a: usize) -> i32 {
         let mut set = HashSet::new();
         set.insert(a);
         let mut last_two = (a, 0);
         while &set != c {
-            let mut best = (0, f32::NEG_INFINITY);
+            let mut best = (0, InfiniteNum::NEG_INFINITY);
             for &y in c.iter() {
                 if set.contains(&y) {
                     continue;
                 }
 
-                let sum = set.iter().map(|&x| g.get(x, y).abs()).sum();
+                let sum = set.iter().map(|&x| g.get(x, y).abs()).sum::<i32>();
                 if sum > best.1 {
                     best = (y, sum);
                 }
@@ -780,7 +838,7 @@ fn min_cut(g: &Graph, c: &HashSet<usize>, a: usize) -> f32 {
         cut_weight
     }
 
-    let mut best = f32::INFINITY;
+    let mut best = InfiniteNum::INFINITY;
     while c.len() > 1 {
         let cut_weight = min_cut_phase(&mut g, &mut c, a);
         if cut_weight < best {
