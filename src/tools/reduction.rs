@@ -47,7 +47,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         for c in components.into_iter() {
             let (cg, imap) = c;
-            let (reduced, _, _, _) = algo::param_independent_reduction(&cg, &imap);
+            let (reduced, _, _, _) = algo::initial_param_independent_reduction(&cg, &imap);
 
             after += reduced.present_node_count();
         }

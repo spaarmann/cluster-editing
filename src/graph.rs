@@ -1,10 +1,35 @@
+pub trait GraphWeight: PartialOrd + Copy {
+    const ZERO: Self;
+    const ONE: Self;
+    const NEG_ONE: Self;
+    fn is_zero(self) -> bool;
+}
+
+impl GraphWeight for f32 {
+    const ZERO: Self = 0.0;
+    const ONE: Self = 1.0;
+    const NEG_ONE: Self = -1.0;
+    fn is_zero(self) -> bool {
+        self.abs() < 0.001
+    }
+}
+
+impl GraphWeight for i32 {
+    const ZERO: Self = 0;
+    const ONE: Self = 1;
+    const NEG_ONE: Self = -1;
+    fn is_zero(self) -> bool {
+        self == 0
+    }
+}
+
 /// An undirected graph without self-loops that stores weights for every pair of vertices (so, for
 /// edges and for non-edges).
 /// Edges have weights >0, non-edges have weights <0.
 ///
 /// Accessing self-loop weights will panic!
 #[derive(Clone, Debug)]
-pub struct Graph {
+pub struct Graph<T: GraphWeight> {
     size: usize,
     /// The graph is internally stored as a linearized triangular matrix.
     /// An example matrix for a graph with four vertices might look like this:
@@ -17,7 +42,7 @@ pub struct Graph {
     /// x | d e f -
     /// ```
     /// This would be stored as `[a, b, c, d, e, f]` in the `matrix` field.
-    matrix: Vec<i32>,
+    matrix: Vec<T>,
     /// The data structure is treated as very fixed-size at the moment, but on order to efficiently
     /// merge vertices in the algorithm, it is possible to mark vertices as "removed"/not-present.
     /// Such vertices will not be returned as part of any neighbor-sets etc. Accessing the weight
@@ -30,7 +55,7 @@ pub struct Graph {
     row_offsets: Vec<usize>,
 }
 
-impl Graph {
+impl<T: GraphWeight> Graph<T> {
     /// Creates a new empty (without any edges) graph with `size` vertices, with all weights set to
     /// -1.0.
     pub fn new(size: usize) -> Self {
@@ -46,7 +71,7 @@ impl Graph {
             .collect();
         Graph {
             size,
-            matrix: vec![-1; mat_size],
+            matrix: vec![T::NEG_ONE; mat_size],
             present: vec![true; size],
             row_offsets,
         }
@@ -66,7 +91,7 @@ impl Graph {
 
         for e in pg.edge_indices() {
             let (u, v) = pg.edge_endpoints(e).unwrap();
-            g.set(u.index(), v.index(), 1);
+            g.set(u.index(), v.index(), T::ONE);
         }
 
         (g, imap)
@@ -91,7 +116,7 @@ impl Graph {
             if self.present[u] {
                 for v in (u + 1)..self.size {
                     if self.present[v] {
-                        if self.get_direct(u, v) > 0 {
+                        if self.get_direct(u, v) > T::ZERO {
                             pg.add_edge(map[u], map[v], 0);
                         }
                     }
@@ -104,7 +129,7 @@ impl Graph {
 
     /// Get the weight associated with pair `(u, v)`.
     /// u and v can be in any order, panics if `u == v`.
-    pub fn get(&self, u: usize, v: usize) -> i32 {
+    pub fn get(&self, u: usize, v: usize) -> T {
         debug_assert!(self.present[u]);
         debug_assert!(self.present[v]);
         assert_ne!(u, v);
@@ -118,7 +143,7 @@ impl Graph {
 
     /// Get the weight associated with pair `(u, v)`.
     /// u and v can be in any order, panics if `u == v`.
-    pub fn get_ref(&self, u: usize, v: usize) -> &i32 {
+    pub fn get_ref(&self, u: usize, v: usize) -> &T {
         debug_assert!(self.present[u]);
         debug_assert!(self.present[v]);
         assert_ne!(u, v);
@@ -132,7 +157,7 @@ impl Graph {
 
     /// Get a mutable reference to the weight associated with pair `(u, v)`.
     /// u and v can be in any order, panics if `u == v`.
-    pub fn get_mut(&mut self, u: usize, v: usize) -> &mut i32 {
+    pub fn get_mut(&mut self, u: usize, v: usize) -> &mut T {
         debug_assert!(self.present[u]);
         debug_assert!(self.present[v]);
         assert_ne!(u, v);
@@ -146,7 +171,7 @@ impl Graph {
 
     /// Set the weight associated with pair `(u, v)`.
     /// u and v can be in any order, panics if `u == v`.
-    pub fn set(&mut self, u: usize, v: usize, w: i32) {
+    pub fn set(&mut self, u: usize, v: usize, w: T) {
         debug_assert!(self.present[u]);
         debug_assert!(self.present[v]);
         assert_ne!(u, v);
@@ -159,25 +184,25 @@ impl Graph {
     }
 
     /// Like `get`, but assumes `u != v` and `u < v` instead of checking both.
-    pub fn get_direct(&self, u: usize, v: usize) -> i32 {
+    pub fn get_direct(&self, u: usize, v: usize) -> T {
         debug_assert!(self.present[u]);
         debug_assert!(self.present[v]);
         self.matrix[self.row_offsets[v] + u]
     }
     /// Like `get_ref`, but assumes `u != v` and `u < v` instead of checking both.
-    pub fn get_ref_direct(&self, u: usize, v: usize) -> &i32 {
+    pub fn get_ref_direct(&self, u: usize, v: usize) -> &T {
         debug_assert!(self.present[u]);
         debug_assert!(self.present[v]);
         &self.matrix[self.row_offsets[v] + u]
     }
     /// Like `get_mut`, but assumes `u != v` and `u < v` instead of checking both.
-    pub fn get_mut_direct(&mut self, u: usize, v: usize) -> &mut i32 {
+    pub fn get_mut_direct(&mut self, u: usize, v: usize) -> &mut T {
         debug_assert!(self.present[u]);
         debug_assert!(self.present[v]);
         &mut self.matrix[self.row_offsets[v] + u]
     }
     /// Like `set`, but assumes `u != v` and `u < v` instead of checking both.
-    pub fn set_direct(&mut self, u: usize, v: usize, w: i32) {
+    pub fn set_direct(&mut self, u: usize, v: usize, w: T) {
         debug_assert!(self.present[u]);
         debug_assert!(self.present[v]);
         self.matrix[self.row_offsets[v] + u] = w;
@@ -188,9 +213,10 @@ impl Graph {
     pub fn neighbors(&self, u: usize) -> impl Iterator<Item = usize> + '_ {
         debug_assert!(self.present[u]);
         (0..u)
-            .filter(move |&v| self.present[v] && self.get_direct(v, u) > 0)
+            .filter(move |&v| self.present[v] && self.get_direct(v, u) > T::ZERO)
             .chain(
-                ((u + 1)..self.size).filter(move |&v| self.present[v] && self.get_direct(u, v) > 0),
+                ((u + 1)..self.size)
+                    .filter(move |&v| self.present[v] && self.get_direct(u, v) > T::ZERO),
             )
     }
 
@@ -199,10 +225,11 @@ impl Graph {
     pub fn closed_neighbors(&self, u: usize) -> impl Iterator<Item = usize> + '_ {
         debug_assert!(self.present[u]);
         (0..u)
-            .filter(move |&v| self.present[v] && self.get_direct(v, u) > 0)
+            .filter(move |&v| self.present[v] && self.get_direct(v, u) > T::ZERO)
             .chain(std::iter::once(u))
             .chain(
-                ((u + 1)..self.size).filter(move |&v| self.present[v] && self.get_direct(u, v) > 0),
+                ((u + 1)..self.size)
+                    .filter(move |&v| self.present[v] && self.get_direct(u, v) > T::ZERO),
             )
     }
 
@@ -224,13 +251,13 @@ impl Graph {
     pub fn has_edge(&self, u: usize, v: usize) -> bool {
         debug_assert!(self.present[u]);
         debug_assert!(self.present[v]);
-        self.get(u, v) > 0
+        self.get(u, v) > T::ZERO
     }
 
     pub fn has_edge_direct(&self, u: usize, v: usize) -> bool {
         debug_assert!(self.present[u]);
         debug_assert!(self.present[v]);
-        self.get_direct(u, v) > 0
+        self.get_direct(u, v) > T::ZERO
     }
 
     pub fn is_present(&self, u: usize) -> bool {
@@ -298,15 +325,15 @@ impl Graph {
     }
 }
 
-impl std::ops::Index<(usize, usize)> for Graph {
-    type Output = i32;
+impl<T: GraphWeight> std::ops::Index<(usize, usize)> for Graph<T> {
+    type Output = T;
     /// Semantics equivalent to `Graph::get_ref`.
     fn index(&self, (u, v): (usize, usize)) -> &Self::Output {
         self.get_ref(u, v)
     }
 }
 
-impl std::ops::IndexMut<(usize, usize)> for Graph {
+impl<T: GraphWeight> std::ops::IndexMut<(usize, usize)> for Graph<T> {
     /// Semantics equivalent to `Graph::get_mut`.
     fn index_mut(&mut self, (u, v): (usize, usize)) -> &mut Self::Output {
         self.get_mut(u, v)
@@ -385,7 +412,7 @@ impl std::ops::IndexMut<usize> for IndexMap {
 mod tests {
     use super::*;
 
-    fn example_graph() -> Graph {
+    fn example_graph() -> Graph<i32> {
         // 0 -- 1
         // |    |
         // 2    3

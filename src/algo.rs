@@ -1,4 +1,8 @@
-use crate::{critical_cliques, graph::IndexMap, Graph, PetGraph};
+use crate::{
+    critical_cliques,
+    graph::{GraphWeight, IndexMap},
+    Graph, PetGraph, Weight,
+};
 
 use std::collections::HashSet;
 
@@ -29,9 +33,6 @@ impl Edit {
     }
 }
 
-/// We want to semantically treat some edge weights as positive or negative infinity. Since we're
-/// using integers as edge weights, which don't support any "infinity" concept out of the box, we
-/// approximate it by using large threshold values.
 trait InfiniteNum {
     const INFINITY: Self;
     const NEG_INFINITY: Self;
@@ -39,15 +40,43 @@ trait InfiniteNum {
     fn is_infinite(self) -> bool;
 }
 
-impl InfiniteNum for i32 {
-    const INFINITY: Self = 100000000;
-    const NEG_INFINITY: Self = -100000000;
+// This actually leads to overflowing adds and consequently breaks stuff in its current form :(
+// Currently using floats again instead, but Graph and all the other code is now generic over the
+// weight, if a fixed impl for this can be done it should be easy to substitute by changing the
+// `Weight` type in lib.rs.
+/*impl InfiniteNum for i32 {
+    const INFINITY: Self = 2 * 100000000;
+    const NEG_INFINITY: Self = -2 * 100000000;
     fn is_finite(self) -> bool {
-        self < Self::INFINITY && self > Self::NEG_INFINITY
+        self < 100000000 && self > -100000000
     }
     fn is_infinite(self) -> bool {
-        self >= Self::INFINITY || self <= Self::NEG_INFINITY
+        self >= 100000000 || self <= -100000000
     }
+}*/
+
+impl InfiniteNum for f32 {
+    const INFINITY: Self = f32::INFINITY;
+    const NEG_INFINITY: Self = f32::NEG_INFINITY;
+    fn is_finite(self) -> bool {
+        self.is_finite()
+    }
+    fn is_infinite(self) -> bool {
+        self.is_infinite()
+    }
+}
+
+#[allow(unused)]
+macro_rules! log_indent {
+    ($k:expr, $l:expr, $s:expr) => (
+        log::log!(log::Level::$l, concat!("{}[k={}]", $s),
+            "\t".repeat((unsafe { K_MAX - $k.max(0.0) }) as usize), $k);
+    );
+    ($k:expr, $l:expr, $s:expr, $($arg:tt)+) => (
+        log::log!($l, concat!("{}[k={}]", $s),
+            "\t".repeat((unsafe { K_MAX - $k.max(0.0) }) as usize),
+            $k, $($arg)+);
+    )
 }
 
 macro_rules! dbg_trace_indent {
@@ -80,7 +109,7 @@ macro_rules! continue_if_not_present {
 
 pub fn execute_algorithm(graph: &PetGraph) -> PetGraph {
     let mut result = graph.clone();
-    let (g, imap) = Graph::new_from_petgraph(&graph);
+    let (g, imap) = Graph::<Weight>::new_from_petgraph(&graph);
     let (components, _) = g.split_into_components(&imap);
 
     info!(
@@ -169,7 +198,7 @@ pub fn execute_algorithm(graph: &PetGraph) -> PetGraph {
     result
 }
 
-pub fn find_optimal_cluster_editing(g: &Graph) -> (i32, Vec<Edit>) {
+pub fn find_optimal_cluster_editing(g: &Graph<Weight>) -> (i32, Vec<Edit>) {
     // TODO: Not sure if executing the algo once with k = 0 is the best
     // way of handling already-disjoint-clique-components.
 
@@ -180,7 +209,7 @@ pub fn find_optimal_cluster_editing(g: &Graph) -> (i32, Vec<Edit>) {
     );
 
     let (reduced_g, imap, edits, k_start) =
-        param_independent_reduction(g, &IndexMap::identity(g.size()));
+        initial_param_independent_reduction(g, &IndexMap::identity(g.size()));
 
     info!(
         "Reduced graph from {} nodes to {} nodes using parameter-independent reduction.",
@@ -221,8 +250,8 @@ static mut K_MAX: f32 = 0.0;
 // `k` is stored as float because it needs to be compared with and changed by values from
 // the WeightMap a lot, which are floats.
 fn find_cluster_editing(
-    g: Graph,
-    imap: IndexMap,
+    mut g: Graph<Weight>,
+    mut imap: IndexMap,
     mut edits: Vec<Edit>,
     mut k: f32,
 ) -> Option<(f32, Vec<Edit>)> {
@@ -266,7 +295,7 @@ fn find_cluster_editing(
                 for v in (u + 1)..g.size() {
                     continue_if_not_present!(g, v);
                     if component_map[u] != component_map[v] {
-                        if g.get_direct(u, v) == 0 {
+                        if g.get_direct(u, v) == Weight::ZERO {
                             zero_count += 1.0;
                         }
                     }
@@ -289,7 +318,16 @@ fn find_cluster_editing(
         }
     }
 
-    dbg_trace_indent!(k, "Searching triple");
+    dbg_trace_indent!(k, "Performing reduction");
+    let _k_start = k;
+    general_param_independent_reduction(&mut g, &mut imap, &mut edits, &mut k);
+    dbg_trace_indent!(_k_start, "Reduced from k={} to k={}", _k_start, k);
+
+    if k < 0.0 {
+        return None;
+    }
+
+    dbg_trace_indent!(_k_start, "Searching triple");
 
     // Search for a conflict triple
     // TODO: Surely this can be done a little smarter?
@@ -328,7 +366,7 @@ fn find_cluster_editing(
                 continue_if_not_present!(g, u);
                 for v in (u + 1)..g.size() {
                     continue_if_not_present!(g, v);
-                    if g.get_direct(u, v) == 0 {
+                    if g.get_direct(u, v).is_zero() {
                         zero_count += 1.0;
                     }
                 }
@@ -336,7 +374,11 @@ fn find_cluster_editing(
 
             k -= zero_count / 2.0;
 
-            dbg_trace_indent!(k, "Found no triple, realized {} zero-edges.", zero_count);
+            dbg_trace_indent!(
+                _k_start,
+                "Found no triple, realized {} zero-edges.",
+                zero_count
+            );
 
             if k < 0.0 {
                 // not enough cost left over to actually realize those zero-edges.
@@ -348,7 +390,7 @@ fn find_cluster_editing(
         Some(t) => t,
     };
 
-    dbg_trace_indent!(k, "Found triple ({}-{}-{}), branching", v, u, _w);
+    dbg_trace_indent!(_k_start, "Found triple ({}-{}-{}), branching", v, u, _w);
 
     // Found a conflict triple, now branch into 2 cases:
     // 1. Set uv to forbidden
@@ -359,11 +401,10 @@ fn find_cluster_editing(
         let uv = g.get_mut(u, v);
         // TODO: Might not need this check after edge merging is in? Maybe?
         if uv.is_finite() {
-            let _k_before = k;
             let k = k - *uv as f32;
             if k >= 0.0 {
                 dbg_trace_indent!(
-                    _k_before,
+                    _k_start,
                     "Branch: Set {}-{} forbidden, k after edit: {} !",
                     u,
                     v,
@@ -376,7 +417,7 @@ fn find_cluster_editing(
                 find_cluster_editing(g, imap, edits, k)
             } else {
                 dbg_trace_indent!(
-                    _k_before,
+                    _k_start,
                     "Skipping Branch: Setting {}-{} to forbidden reduces k past 0!",
                     u,
                     v
@@ -397,12 +438,11 @@ fn find_cluster_editing(
         // TODO: Might not need this check after edge merging is in? Maybe?
         if uv.is_finite() {
             let mut k = k;
-            let _k_before_merge = k;
             merge(&mut g, &mut imap, &mut k, &mut edits, u, v);
 
             if k >= 0.0 {
                 dbg_trace_indent!(
-                    _k_before_merge,
+                    _k_start,
                     "Branch: Merge {}-{}, k after merging: {} !",
                     u,
                     v,
@@ -412,7 +452,7 @@ fn find_cluster_editing(
                 find_cluster_editing(g, imap, edits, k)
             } else {
                 dbg_trace_indent!(
-                    _k_before_merge,
+                    _k_start,
                     "Skipping Branch: Merging {}-{} reduces k past 0!",
                     u,
                     v
@@ -438,7 +478,7 @@ fn find_cluster_editing(
 // Merge u and v. The merged vertex becomes the new vertex at index u in the graph, while v is
 // marked as not present anymore.
 fn merge(
-    g: &mut Graph,
+    g: &mut Graph<Weight>,
     imap: &mut IndexMap,
     k: &mut f32,
     edits: &mut Vec<Edit>,
@@ -459,12 +499,12 @@ fn merge(
         let uw = g.get(u, w);
         let vw = g.get(v, w);
 
-        if uw > 0 {
-            if vw < 0 {
+        if uw > Weight::ZERO {
+            if vw < Weight::ZERO {
                 // (+, -)
                 let new_weight = merge_nonmatching_nonzero(g, imap, k, edits, u, v, w);
                 g.set(u, w, new_weight);
-            } else if vw > 0 {
+            } else if vw > Weight::ZERO {
                 // (+, +)
                 g.set(u, w, uw + vw);
             } else {
@@ -472,11 +512,11 @@ fn merge(
                 *k -= 0.5;
                 Edit::insert(edits, imap, v, w);
             }
-        } else if uw < 0 {
-            if vw < 0 {
+        } else if uw < Weight::ZERO {
+            if vw < Weight::ZERO {
                 // (-, -)
                 g.set(u, w, uw + vw);
-            } else if vw > 0 {
+            } else if vw > Weight::ZERO {
                 // (-, +)
                 let new_weight = merge_nonmatching_nonzero(g, imap, k, edits, v, u, w);
                 g.set(u, w, new_weight);
@@ -485,11 +525,11 @@ fn merge(
                 *k -= 0.5;
             }
         } else {
-            if vw < 0 {
+            if vw < Weight::ZERO {
                 // (0, -)
                 *k -= 0.5;
                 g.set(u, w, vw);
-            } else if vw > 0 {
+            } else if vw > Weight::ZERO {
                 // (0, +)
                 *k -= 0.5;
                 g.set(u, w, vw);
@@ -520,21 +560,21 @@ fn merge(
 // Adds appropriate edits to `edits` and modifies `k` and returns the correct new weight for the
 // merged edge.
 fn merge_nonmatching_nonzero(
-    g: &Graph,
+    g: &Graph<Weight>,
     imap: &IndexMap,
     k: &mut f32,
     edits: &mut Vec<Edit>,
     u: usize,
     v: usize,
     w: usize,
-) -> i32 {
+) -> Weight {
     let uw = g.get(u, w);
     let vw = g.get(v, w);
 
-    if uw + vw == 0 {
+    if (uw + vw).is_zero() {
         *k -= uw as f32 - 0.5;
         Edit::delete(edits, imap, u, w);
-        return 0;
+        return Weight::ZERO;
     } else {
         if uw > -vw {
             *k -= -vw as f32;
@@ -547,30 +587,50 @@ fn merge_nonmatching_nonzero(
     }
 }
 
-/// Performs parameter-independent reduction on the graph. A new graph and corresponding IndexMap
-/// are returned, along with a list of edits performed.
+/// Performs initial parameter-independent reduction on the graph. A new graph and corresponding IndexMap
+/// are returned, along with a list of edits performed. The reduction assumes an unweighted graph
+/// as input (i.e. one with only weights 1 and -1).
 /// The reduction may also allow placing a lower bounds on the optimal `k` parameter, which is also
 /// returned.
-pub fn param_independent_reduction(
-    g: &Graph,
+pub fn initial_param_independent_reduction(
+    g: &Graph<Weight>,
     imap: &IndexMap,
-) -> (Graph, IndexMap, Vec<Edit>, f32) {
+) -> (Graph<Weight>, IndexMap, Vec<Edit>, f32) {
     // Simply merging all critical cliques leads to a graph with at most 4 * k_opt vertices.
-    let (g, imap) = critical_cliques::merge_cliques(g, imap);
+    let (mut g, mut imap) = critical_cliques::merge_cliques(g, imap);
     let k_start = (g.size() / 4) as f32;
 
-    // Rules from "Böcker et al., Exact Algorithms for Cluster Editing: Evaluation and
-    // Experiments", 2011
-    let (g, imap, edits) = apply_reduction_rules(g.clone(), imap.clone());
+    let mut edits = Vec::new();
+    general_param_independent_reduction(&mut g, &mut imap, &mut edits, &mut 0.0);
+
+    // TODO: It would seem that merging steps above could potentially result in zero-edges in the
+    // graph. The algorithm is generally described as requiring that *no* zero-edges are in the
+    // input, so doesn't this pose a problem?
+    // For now, this checks if we do ever produce any zero-edges and logs an error if so.
+    for u in 0..g.size() {
+        continue_if_not_present!(g, u);
+        for v in g.neighbors(u) {
+            if g.get(u, v).is_zero() {
+                log::error!("Produced a zero-edge during parameter-independent reduction!");
+            }
+        }
+    }
 
     // TODO: If we never end up getting a parameter-independent reduction that produces edits,
     // remove that return value.
     (g, imap, edits, k_start)
 }
 
-fn apply_reduction_rules(mut g: Graph, mut imap: IndexMap) -> (Graph, IndexMap, Vec<Edit>) {
-    let mut edits = Vec::new();
-
+/// Rules from "Böcker et al., Exact Algorithms for Cluster Editing: Evaluation and
+/// Experiments", 2011
+/// Can be applied during the search as well, can modify `k` appropriately and don't require any
+/// specific form of the input.
+fn general_param_independent_reduction(
+    g: &mut Graph<Weight>,
+    imap: &mut IndexMap,
+    edits: &mut Vec<Edit>,
+    k: &mut f32,
+) {
     // TODO: Optimize these! This is a super naive implementation, even the paper directly
     // describes a better strategy for doing it.
 
@@ -588,12 +648,22 @@ fn apply_reduction_rules(mut g: Graph, mut imap: IndexMap) -> (Graph, IndexMap, 
                 continue_if_not_present!(g, v);
 
                 let uv = g.get(u, v);
-                if uv >= 0 || !uv.is_finite() {
+                if uv >= Weight::ONE || !uv.is_finite() {
                     continue;
                 }
 
                 let sum = g.neighbors(u).map(|w| g.get(u, w)).sum();
                 if -uv >= sum {
+                    /*log_indent!(
+                        *k,
+                        log::Level::Warn,
+                        "Setting {}-{} forbidden with weight {} but sum around {} being {}",
+                        u,
+                        v,
+                        uv,
+                        u,
+                        sum
+                    );*/
                     g.set(u, v, InfiniteNum::NEG_INFINITY);
                     applied_any_rule = true;
                 }
@@ -610,7 +680,7 @@ fn apply_reduction_rules(mut g: Graph, mut imap: IndexMap) -> (Graph, IndexMap, 
                 continue_if_not_present!(g, v);
 
                 let uv = g.get(u, v);
-                if uv <= 0 {
+                if uv <= Weight::ZERO {
                     continue;
                 }
 
@@ -626,7 +696,7 @@ fn apply_reduction_rules(mut g: Graph, mut imap: IndexMap) -> (Graph, IndexMap, 
                     .sum();
 
                 if uv >= sum {
-                    merge(&mut g, &mut imap, &mut 0.0, &mut edits, u, v);
+                    merge(g, imap, k, edits, u, v);
                     applied_any_rule = true;
                 }
             }
@@ -641,20 +711,20 @@ fn apply_reduction_rules(mut g: Graph, mut imap: IndexMap) -> (Graph, IndexMap, 
                 continue_if_not_present!(g, v);
 
                 let uv = g.get_direct(u, v);
-                if uv <= 0 {
+                if uv <= Weight::ZERO {
                     continue;
                 }
 
                 let sum = g
                     .neighbors(u)
-                    .map(|w| if w == v { 0 } else { g.get(u, w) })
-                    .sum::<i32>()
+                    .map(|w| if w == v { Weight::ZERO } else { g.get(u, w) })
+                    .sum::<Weight>()
                     + g.neighbors(v)
-                        .map(|w| if w == u { 0 } else { g.get(v, w) })
-                        .sum::<i32>();
+                        .map(|w| if w == u { Weight::ZERO } else { g.get(v, w) })
+                        .sum::<Weight>();
 
                 if uv >= sum {
-                    merge(&mut g, &mut imap, &mut 0.0, &mut edits, u, v);
+                    merge(g, imap, k, edits, u, v);
                     applied_any_rule = true;
                 }
             }
@@ -678,8 +748,14 @@ fn apply_reduction_rules(mut g: Graph, mut imap: IndexMap) -> (Graph, IndexMap, 
                 |(max_u, max), u| {
                     let val = g
                         .nodes()
-                        .map(|v| if u == v { 0 } else { g.get(u, v).abs() })
-                        .sum::<i32>();
+                        .map(|v| {
+                            if u == v {
+                                Weight::ZERO
+                            } else {
+                                g.get(u, v).abs()
+                            }
+                        })
+                        .sum::<Weight>();
                     if val > max {
                         (u, val)
                     } else {
@@ -698,13 +774,14 @@ fn apply_reduction_rules(mut g: Graph, mut imap: IndexMap) -> (Graph, IndexMap, 
                 if c.contains(&w) {
                     continue;
                 }
-                let (sum, connected_count) = c.iter().fold((0, 0), |(sum, mut count), &v| {
-                    let vw = g.get(v, w);
-                    if vw > 0 {
-                        count += 1;
-                    }
-                    (sum + vw, count)
-                });
+                let (sum, connected_count) =
+                    c.iter().fold((Weight::ZERO, 0), |(sum, mut count), &v| {
+                        let vw = g.get(v, w);
+                        if vw > Weight::ZERO {
+                            count += 1;
+                        }
+                        (sum + vw, count)
+                    });
                 if sum > max.1 {
                     second = (max.0, max.1);
                     max = (w, sum, connected_count);
@@ -713,7 +790,7 @@ fn apply_reduction_rules(mut g: Graph, mut imap: IndexMap) -> (Graph, IndexMap, 
                 }
             }
 
-            if max.1 < 0 && max.1.is_infinite() {
+            if max.1 < Weight::ZERO && max.1.is_infinite() {
                 // Didn't find anything to add.
                 break;
             }
@@ -721,33 +798,39 @@ fn apply_reduction_rules(mut g: Graph, mut imap: IndexMap) -> (Graph, IndexMap, 
             let w = max.0;
             c.insert(w);
 
-            if max.1 > second.1 * 2 {
+            if max.1 > second.1 * 2.0 {
                 let k_c = min_cut(&g, &c, first);
 
                 let sum_neg_internal = c
                     .iter()
                     .map(|&u| {
                         c.iter()
-                            .map(|&v| if u != v { g.get(u, v).max(0).abs() } else { 0 })
-                            .sum::<i32>()
+                            .map(|&v| {
+                                if u != v {
+                                    g.get(u, v).max(Weight::ZERO).abs()
+                                } else {
+                                    Weight::ZERO
+                                }
+                            })
+                            .sum::<Weight>()
                     })
-                    .sum::<i32>();
+                    .sum::<Weight>();
 
                 let sum_pos_crossing = c
                     .iter()
                     .map(|&u| {
                         g.nodes()
                             .filter(|v| !c.contains(v))
-                            .map(|v| g.get(u, v).min(0))
-                            .sum::<i32>()
+                            .map(|v| g.get(u, v).min(Weight::ZERO))
+                            .sum::<Weight>()
                     })
-                    .sum::<i32>();
+                    .sum::<Weight>();
 
                 if k_c > sum_neg_internal + sum_pos_crossing {
                     let mut nodes = c.into_iter();
                     let first = nodes.next().unwrap();
                     for v in nodes {
-                        merge(&mut g, &mut imap, &mut 0.0, &mut edits, first, v);
+                        merge(g, imap, k, edits, first, v);
                     }
                     applied_any_rule = true;
                     break;
@@ -757,7 +840,7 @@ fn apply_reduction_rules(mut g: Graph, mut imap: IndexMap) -> (Graph, IndexMap, 
             let connected_count_outside = g
                 .nodes()
                 .filter(|v| !c.contains(v))
-                .filter(|&v| g.get(v, w) > 0)
+                .filter(|&v| g.get(v, w) > Weight::ZERO)
                 .count();
 
             if connected_count_outside > max.2 {
@@ -772,37 +855,20 @@ fn apply_reduction_rules(mut g: Graph, mut imap: IndexMap) -> (Graph, IndexMap, 
 
         // Rule 5
     }
-
-    // TODO: It would seem that merging steps above could potentially result in zero-edges in the
-    // graph. The algorithm is generally described as requiring that *no* zero-edges are in the
-    // input, so doesn't this pose a problem?
-    // For now, this checks if we do ever produce any zero-edges and logs an error if so.
-    for u in 0..g.size() {
-        continue_if_not_present!(g, u);
-        for v in g.neighbors(u) {
-            if g.get(u, v) == 0 {
-                log::error!("Produced a zero-edge during parameter-independent reduction!");
-            }
-        }
-    }
-
-    // TODO: Consider condensing the Graph after this (i.e. produce a smaller-sized graph that only
-    // contains the vertices that are still "present" in g)
-    (g, imap, edits)
 }
 
-fn min_cut(g: &Graph, c: &HashSet<usize>, a: usize) -> i32 {
+fn min_cut(g: &Graph<Weight>, c: &HashSet<usize>, a: usize) -> Weight {
     let mut g = g.clone();
     let mut c = c.clone();
 
-    fn merge_mc(g: &mut Graph, c: &mut HashSet<usize>, u: usize, v: usize) {
+    fn merge_mc(g: &mut Graph<Weight>, c: &mut HashSet<usize>, u: usize, v: usize) {
         for &w in c.iter() {
             if w == u || w == v {
                 continue;
             }
             let uw = g.get(u, w);
             let vw = g.get(v, w);
-            if uw + vw > 0 {
+            if uw + vw > Weight::ZERO {
                 g.set(u, w, uw + vw);
             }
         }
@@ -810,7 +876,7 @@ fn min_cut(g: &Graph, c: &HashSet<usize>, a: usize) -> i32 {
         c.remove(&v);
     }
 
-    fn min_cut_phase(g: &mut Graph, c: &mut HashSet<usize>, a: usize) -> i32 {
+    fn min_cut_phase(g: &mut Graph<Weight>, c: &mut HashSet<usize>, a: usize) -> Weight {
         let mut set = HashSet::new();
         set.insert(a);
         let mut last_two = (a, 0);
@@ -821,7 +887,7 @@ fn min_cut(g: &Graph, c: &HashSet<usize>, a: usize) -> i32 {
                     continue;
                 }
 
-                let sum = set.iter().map(|&x| g.get(x, y).abs()).sum::<i32>();
+                let sum = set.iter().map(|&x| g.get(x, y).abs()).sum::<Weight>();
                 if sum > best.1 {
                     best = (y, sum);
                 }

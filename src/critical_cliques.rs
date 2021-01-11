@@ -1,4 +1,7 @@
-use crate::{graph::IndexMap, Graph};
+use crate::{
+    graph::{GraphWeight, IndexMap},
+    Graph, Weight,
+};
 
 #[derive(Debug, Clone, Default)]
 pub struct CritClique {
@@ -7,7 +10,7 @@ pub struct CritClique {
 
 pub struct CritCliqueGraph {
     pub cliques: Vec<CritClique>,
-    pub graph: Graph,
+    pub graph: Graph<Weight>,
 }
 
 impl CritCliqueGraph {
@@ -29,7 +32,7 @@ impl CritCliqueGraph {
 
         for u in 0..self.graph.size() {
             for v in (u + 1)..self.graph.size() {
-                if self.graph.get_direct(u, v) > 0 {
+                if self.graph.get_direct(u, v) > Weight::ZERO {
                     pg.add_edge(NodeIndex::new(u), NodeIndex::new(v), 0);
                 }
             }
@@ -39,7 +42,7 @@ impl CritCliqueGraph {
     }
 }
 
-pub fn build_crit_clique_graph(g: &Graph) -> CritCliqueGraph {
+pub fn build_crit_clique_graph(g: &Graph<Weight>) -> CritCliqueGraph {
     let mut cliques = Vec::new();
 
     // TODO: This looks at least O(n^2) but should apparently be do-able in O(n + m), so have
@@ -82,7 +85,7 @@ pub fn build_crit_clique_graph(g: &Graph) -> CritCliqueGraph {
             }
 
             if should_be_neighbors(g, &cliques[c1], &cliques[c2]) {
-                crit_graph.set(c1, c2, 1);
+                crit_graph.set(c1, c2, Weight::ONE);
             }
         }
     }
@@ -93,7 +96,7 @@ pub fn build_crit_clique_graph(g: &Graph) -> CritCliqueGraph {
     }
 }
 
-fn should_be_neighbors(g: &Graph, c1: &CritClique, c2: &CritClique) -> bool {
+fn should_be_neighbors(g: &Graph<Weight>, c1: &CritClique, c2: &CritClique) -> bool {
     for &u in &c1.vertices {
         for &v in &c2.vertices {
             if !g.has_edge(u, v) {
@@ -109,7 +112,7 @@ fn should_be_neighbors(g: &Graph, c1: &CritClique, c2: &CritClique) -> bool {
 /// graph and merging all critical cliques into a single vertex.
 /// This assumes that the input graph is unweighted (i.e. all weights are +1 or -1 exactly). The
 /// reduced graph will be weighted however.
-pub fn merge_cliques(g: &Graph, imap: &IndexMap) -> (Graph, IndexMap) {
+pub fn merge_cliques(g: &Graph<Weight>, imap: &IndexMap) -> (Graph<Weight>, IndexMap) {
     let mut crit = build_crit_clique_graph(g);
 
     let mut crit_imap = IndexMap::empty(crit.graph.size());
@@ -119,7 +122,7 @@ pub fn merge_cliques(g: &Graph, imap: &IndexMap) -> (Graph, IndexMap) {
             let uv = crit.graph.get_mut_direct(u, v);
             let sign = uv.signum();
             let weight = crit.cliques[u].vertices.len() * crit.cliques[v].vertices.len();
-            *uv = (weight as i32) * sign;
+            *uv = (weight as Weight) * sign;
         }
 
         crit_imap.set(
@@ -581,19 +584,19 @@ mod tests {
         // editing, 2009", Fig. 1
 
         let mut graph = Graph::new(9);
-        graph.set(0, 1, 1);
-        graph.set(0, 2, 1);
-        graph.set(1, 2, 1);
-        graph.set(2, 3, 1);
-        graph.set(2, 4, 1);
-        graph.set(3, 4, 1);
-        graph.set(3, 5, 1);
-        graph.set(3, 6, 1);
-        graph.set(4, 5, 1);
-        graph.set(4, 6, 1);
-        graph.set(5, 6, 1);
-        graph.set(5, 7, 1);
-        graph.set(5, 8, 1);
+        graph.set(0, 1, Weight::ONE);
+        graph.set(0, 2, Weight::ONE);
+        graph.set(1, 2, Weight::ONE);
+        graph.set(2, 3, Weight::ONE);
+        graph.set(2, 4, Weight::ONE);
+        graph.set(3, 4, Weight::ONE);
+        graph.set(3, 5, Weight::ONE);
+        graph.set(3, 6, Weight::ONE);
+        graph.set(4, 5, Weight::ONE);
+        graph.set(4, 6, Weight::ONE);
+        graph.set(5, 6, Weight::ONE);
+        graph.set(5, 7, Weight::ONE);
+        graph.set(5, 8, Weight::ONE);
 
         let crit = build_crit_clique_graph(&graph);
 
