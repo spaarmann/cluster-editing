@@ -1,4 +1,4 @@
-use cluster_editing::{algo, parser, Graph, PetGraph};
+use cluster_editing::{parser, reduction, Graph, PetGraph};
 
 use std::collections::HashMap;
 use std::error::Error;
@@ -47,7 +47,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         for c in components.into_iter() {
             let (cg, imap) = c;
-            let (reduced, _, _, _) = algo::initial_param_independent_reduction(&cg, &imap);
+            let (reduced, _, _, _) = reduction::initial_param_independent_reduction(&cg, &imap);
 
             after += reduced.present_node_count();
         }
