@@ -13,7 +13,7 @@ time, `num-workers` should probably be reduced, with a corresponding effect on r
 
 To collect a list of instances that were solved, execute
 ```
-$ grep -r "Output graph has" runner_out/ | cut -d ":" -f 1 | cut -d "/" -f 2 | sed 's/.out//g' | sed 's/^/instances\//' > perftestinstances
+$ grep -r "Output graph has" runner_out/ | cut -d ":" -f 1 | cut -d "/" -f 2 | sed 's/.out//g' | sed 's/^/instances\//' > tests/perf_instances
 ```
 
 ## Testing
@@ -21,7 +21,7 @@ $ grep -r "Output graph has" runner_out/ | cut -d ":" -f 1 | cut -d "/" -f 2 | s
 Before the change under inspection, execute
 ```
 $ cargo build --release
-$ time cargo run --release --bin runner -- --num-workers 1 --timeout 5 perftest_out (cat perftestinstances)
+$ time cargo run --release --bin runner -- --num-workers 1 --timeout 5 tests/perf_out (cat tests/perf_instances)
 ```
 and note the resulting timing.
 
