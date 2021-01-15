@@ -43,8 +43,9 @@ pub fn execute_algorithm(graph: &PetGraph) -> PetGraph {
     );
 
     for (i, c) in components.into_iter().enumerate() {
-        info!("Solving component {}...", i);
         let (cg, imap) = c;
+        info!("Solving component {}...", i);
+        log::warn!("component has imap {:?}", imap);
         let (k, edits) = find_optimal_cluster_editing(&cg);
 
         // TODO: The algorithm can produce "overlapping" edits. It might e.g. have a "delete(uv)"
