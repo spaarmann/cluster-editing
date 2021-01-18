@@ -46,8 +46,6 @@ pub fn initial_param_independent_reduction(
         }
     }
 
-    // TODO: If we never end up getting a parameter-independent reduction that produces edits,
-    // remove that return value.
     (g, imap, edits, k_start)
 }
 
@@ -62,7 +60,7 @@ pub fn general_param_independent_reduction(
     k: &mut f32,
     _final_path_debugs: &mut String,
 ) {
-    // TODO: Optimize some of these! This is a super naive implementation, even the paper directly
+    // TODO: Optimize at least rules 1-3 ! This is a super naive implementation, even the paper directly
     // describes a better strategy for doing it.
 
     let _k_start = *k;
@@ -282,8 +280,6 @@ pub fn rule4(
         .0;
     c.insert(first);
 
-    dbg_trace_indent!(*k, "Chose {:?} as first for rule4.", imap[first]);
-
     loop {
         let mut max = (usize::MAX, InfiniteNum::NEG_INFINITY, 0); // (vertex, connectivity, count of connected vertices in c)
         let mut second = (usize::MAX, InfiniteNum::NEG_INFINITY);
@@ -396,7 +392,7 @@ pub fn rule5(
         relevant_pairs: Vec<(Weight, Weight)>,
     }
 
-    fn compute_initial_data(g: &Graph<Weight>, imap: &IndexMap, u: usize, v: usize) -> R5Data {
+    fn compute_initial_data(g: &Graph<Weight>, u: usize, v: usize) -> R5Data {
         let mut delta_u = Weight::ZERO;
         let mut delta_v = Weight::ZERO;
         let mut max_x = Weight::ZERO;
@@ -416,8 +412,6 @@ pub fn rule5(
             let x_edge = x > Weight::ZERO;
             let y_edge = y > Weight::ZERO;
 
-            //log::warn!("w: {:?}, x {}, y {}", imap[w], x, y);
-
             if x_edge == y_edge {
                 relevant_pairs.push((x, y));
                 relative_difference += (x - y).abs();
@@ -426,11 +420,9 @@ pub fn rule5(
                 }
             } else {
                 if x_edge {
-                    //log::warn!("du += {}; dv -= {} (because of {:?})", x, y, imap[w]);
                     delta_u += x;
                     delta_v -= y;
                 } else {
-                    //log::warn!("du -= {}; dv += {} (because of {:?})", x, y, imap[w]);
                     delta_u -= x;
                     delta_v += y;
                 }
@@ -547,7 +539,7 @@ pub fn rule5(
                 continue;
             }
 
-            let d = compute_initial_data(g, imap, u, v);
+            let d = compute_initial_data(g, u, v);
 
             if uv <= Weight::min(d.delta_u, d.delta_v) {
                 // No chance of satisfying condition
@@ -599,153 +591,7 @@ pub fn rule5(
             // TODO: Paper claims it might be good to use the two bounds above to decide in which
             // order the below computation should be executed for the edges, but the PEACE impl
             // doesn't seem to do anything of the sort either, afaict.
-
-            /*
-            let neighbors_u = g.neighbors(u).collect::<HashSet<_>>();
-            let neighbors_v = g.neighbors(v).collect::<HashSet<_>>();
-
-            let n_u = {
-                let mut n = neighbors_u
-                    .difference(&neighbors_v)
-                    .copied()
-                    .collect::<HashSet<_>>();
-                n.remove(&v);
-                n
-            };
-            let n_v = {
-                let mut n = neighbors_v
-                    .difference(&neighbors_u)
-                    .copied()
-                    .collect::<HashSet<_>>();
-                n.remove(&u);
-                n
-            };
-
-            let w = {
-                let mut w = g.nodes().collect::<HashSet<_>>();
-                w = w.difference(&n_u).copied().collect();
-                w = w.difference(&n_v).copied().collect();
-                w.remove(&u);
-                w.remove(&v);
-                w
-            };
-
-            let delta_u = weight_to_set(g, u, &n_u) - weight_to_set(g, u, &n_v);
-            let delta_v = weight_to_set(g, v, &n_v) - weight_to_set(g, v, &n_u);
-
-            if uv <= Weight::min(delta_u, delta_v) {
-                // No chance of satisfying condition
-                continue;
-            }
-
-            let sum = w
-                .iter()
-                .map(|&w| (g.get(u, w) - g.get(v, w)).abs())
-                .sum::<Weight>();
-            if uv >= 0.5 * (sum + delta_u + delta_v) {
-                // Can always merge, no need to compute the more expensive stuff
-                merge(g, imap, k, edits, u, v);
-                applied = true;
-                continue;
-            }
-
-            // TODO: Apparently it might be good to use the two bounds above to decide in which
-            // order the below computation should be executed for the edges.
-
-            let b = w
-                .iter()
-                .map(|&w| (g.get(u, w), g.get(v, w)))
-                .collect::<Vec<_>>();
-            let max_x = b
-                .iter()
-                .filter(|&(x, _)| x.is_finite())
-                .map(|&(x, _)| x.abs())
-                .sum::<Weight>()
-                .ceil() as isize;
-
-            // The indexing here relies on weights actually being integers! We may be storing them
-            // as floats for convenient infinity-handling, but any finite weights should always
-            // have integer values.
-
-            // This implementation is pretty directly based on that in the PEACE source code, the
-            // description of the actual implementation of rule 5 in the paper itself is... kind of
-            // bad. It ignores the possible presence of -Infinity values entirely, which means
-            // parts of it are actually incorrect/not implementable as described, and it's also
-            // rather unclear in various other aspects (use of `x` to mean rather different things
-            // all the time, including inside a single formula, a formulation in terms of sets of
-            // pairs of edge weights that would seem to be incorrect if there are duplicates of
-            // those (sets are not lists, the implementation uses a list), ...).
-
-            // [-max_x, ..., -1, 0, 1, ..., max_x, max_x + 1 => infinity slot]
-            let idx_offset = max_x;
-
-            let inf_idx = (max_x * 2 + 1) as usize;
-
-            let mut m_prev = vec![Weight::NEG_INFINITY; (max_x * 2 + 2) as usize];
-            m_prev[0 + idx_offset as usize] = Weight::ZERO;
-
-            // Get an index into an m_j array based the `x` value
-            let get_idx = |i: Weight| {
-                if i.is_finite() {
-                    (i.round() as isize + idx_offset) as usize
-                } else {
-                    inf_idx
-                }
-            };
-
-            let mut m_next = m_prev.clone();
-
-            for (x_j, y_j) in b {
-                if x_j.is_infinite() {}
-
-                for x in -max_x..=max_x {
-                    let x = x as Weight;
-
-                    log::warn!(
-                        "j {}, x {}, x_j {}, get_idx(x) {}, get_idx(x + x_j) {}, get_idx(x - x_j) {}",
-                        j,
-                        x,
-                        x_j,
-                        get_idx(x),
-                        get_idx(x + x_j),
-                        get_idx(x - x_j)
-                    );
-                    let first = ms[j - 1][get_idx(x)];
-                    let second = ms[j - 1][get_idx(x + x_j)] - y_j;
-                    let third = ms[j - 1][get_idx(x - x_j)] + y_j;
-
-                    // This is then m_j[get_idx(x)]
-                    m_j.push(first.max(second).max(third));
-                }
-
-                // TODO: Hm, is this really always correct?
-                // This is then m_j[get_idx(Weight::NEG_INFINITY)]
-                m_j.push(Weight::NEG_INFINITY);
-
-                ms.push(m_j);
-            }
-
-            let last_m = ms.last().unwrap();
-
-            let max = (-max_x..=max_x)
-                .map(|x| x as Weight)
-                .fold(Weight::NEG_INFINITY, |max, x| {
-                    Weight::max(max, Weight::min(x + delta_u, last_m[get_idx(x)] + delta_v))
-                });
-
-            if uv >= max {
-                merge(g, imap, k, edits, u, v);
-                applied = true;
-            }*/
         }
-    }
-
-    fn weight_to_set<'a>(
-        g: &Graph<Weight>,
-        u: usize,
-        set: impl IntoIterator<Item = &'a usize>,
-    ) -> Weight {
-        set.into_iter().map(|&v| g.get(u, v)).sum()
     }
 
     applied

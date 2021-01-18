@@ -366,13 +366,7 @@ fn find_cluster_editing(
                 Edit::delete(&mut edits, &imap, u, v);
                 *uv = InfiniteNum::NEG_INFINITY;
 
-                let (res, _path_debugs) = find_cluster_editing(g, imap, edits, k, _path_debugs);
-
-                if _k_start == 42.0 {
-                    log::info!("k=42 forbid branch, log was: {}", _path_debugs);
-                }
-
-                (res, _path_debugs)
+                find_cluster_editing(g, imap, edits, k, _path_debugs)
             } else {
                 dbg_trace_indent!(
                     _k_start,
