@@ -6,6 +6,8 @@ use crate::{
     Graph, Weight,
 };
 
+use crate::algo::K_MAX;
+
 use std::collections::HashSet;
 
 /// Performs initial parameter-independent reduction on the graph. A new graph and corresponding IndexMap
@@ -16,13 +18,20 @@ use std::collections::HashSet;
 pub fn initial_param_independent_reduction(
     g: &Graph<Weight>,
     imap: &IndexMap,
+    _final_path_debugs: &mut String,
 ) -> (Graph<Weight>, IndexMap, Vec<Edit>, f32) {
     // Simply merging all critical cliques leads to a graph with at most 4 * k_opt vertices.
-    let (mut g, mut imap) = critical_cliques::merge_cliques(g, imap);
+    let (mut g, mut imap) = critical_cliques::merge_cliques(g, imap, _final_path_debugs);
     let k_start = (g.size() / 4) as f32;
 
     let mut edits = Vec::new();
-    general_param_independent_reduction(&mut g, &mut imap, &mut edits, &mut 0.0);
+    general_param_independent_reduction(
+        &mut g,
+        &mut imap,
+        &mut edits,
+        &mut 0.0,
+        _final_path_debugs,
+    );
 
     // TODO: It would seem that merging steps above could potentially result in zero-edges in the
     // graph. The algorithm is generally described as requiring that *no* zero-edges are in the
@@ -51,29 +60,52 @@ pub fn general_param_independent_reduction(
     imap: &mut IndexMap,
     edits: &mut Vec<Edit>,
     k: &mut f32,
+    _final_path_debugs: &mut String,
 ) {
-    // TODO: Optimize these! This is a super naive implementation, even the paper directly
+    // TODO: Optimize some of these! This is a super naive implementation, even the paper directly
     // describes a better strategy for doing it.
 
+    let _k_start = *k;
+    dbg_trace_indent!(
+        _k_start,
+        "Starting gen-param-indep-reduction, k {}, edits {:?}.",
+        k,
+        edits
+    );
+
     let mut applied_any_rule = true;
-    while applied_any_rule {
+    while applied_any_rule && *k > 0.0 {
         applied_any_rule = false;
 
+        let r5 = true;
+        let r4 = true;
+        let r3 = true;
+        let r2 = true;
+        let r1 = true;
+
         // Rule 1 (heavy non-edge rule)
-        applied_any_rule |= rule1(g);
+        if r1 {
+            applied_any_rule |= rule1(g, imap, k, _final_path_debugs);
+        }
 
         // Rule 2 (heavy edge rule, single end)
-        applied_any_rule |= rule2(g, imap, edits, k);
+        if r2 {
+            applied_any_rule |= rule2(g, imap, edits, k, _final_path_debugs);
+        }
 
         // Rule 3 (heavy edge rule, both ends)
-        applied_any_rule |= rule3(g, imap, edits, k);
+        if r3 {
+            applied_any_rule |= rule3(g, imap, edits, k, _final_path_debugs);
+        }
 
         if g.present_node_count() <= 1 {
             break;
         }
 
         // Rule 4
-        applied_any_rule |= rule4(g, imap, edits, k);
+        if r4 {
+            applied_any_rule |= rule4(g, imap, edits, k, _final_path_debugs);
+        }
 
         // Try Rule 5 only if no other rules could be applied
         if applied_any_rule {
@@ -81,11 +113,25 @@ pub fn general_param_independent_reduction(
         }
 
         // Rule 5
-        applied_any_rule = rule5(g, imap, edits, k);
+        if r5 {
+            applied_any_rule = rule5(g, imap, edits, k, _final_path_debugs);
+        }
     }
+
+    dbg_trace_indent!(
+        _k_start,
+        "Finished gen-param-indep-reduction, {}, edits {:?}.",
+        k,
+        edits
+    );
 }
 
-pub fn rule1(g: &mut Graph<Weight>) -> bool {
+pub fn rule1(
+    g: &mut Graph<Weight>,
+    imap: &IndexMap,
+    k: &f32,
+    _final_path_debugs: &mut String,
+) -> bool {
     let mut applied = false;
     for u in 0..g.size() {
         continue_if_not_present!(g, u);
@@ -102,6 +148,10 @@ pub fn rule1(g: &mut Graph<Weight>) -> bool {
 
             let sum = g.neighbors(u).map(|w| g.get(u, w)).sum();
             if -uv >= sum {
+                _final_path_debugs
+                    .push_str(&format!("rule1, forbidding {:?}-{:?}\n", imap[u], imap[v]));
+                dbg_trace_indent!(*k, "rule1, forbidding {:?}-{:?}", imap[u], imap[v]);
+
                 g.set(u, v, InfiniteNum::NEG_INFINITY);
                 applied = true;
             }
@@ -115,6 +165,7 @@ pub fn rule2(
     imap: &mut IndexMap,
     edits: &mut Vec<Edit>,
     k: &mut f32,
+    _final_path_debugs: &mut String,
 ) -> bool {
     let mut applied = false;
     for u in 0..g.size() {
@@ -142,6 +193,9 @@ pub fn rule2(
                 .sum();
 
             if uv >= sum {
+                dbg_trace_indent!(*k, "rule2 merge {:?}-{:?}", imap[u], imap[v]);
+                _final_path_debugs.push_str(&format!("rule2, merge {:?}-{:?}\n", imap[u], imap[v]));
+
                 merge(g, imap, k, edits, u, v);
                 applied = true;
             }
@@ -155,6 +209,7 @@ pub fn rule3(
     imap: &mut IndexMap,
     edits: &mut Vec<Edit>,
     k: &mut f32,
+    _final_path_debugs: &mut String,
 ) -> bool {
     let mut applied = false;
     for u in 0..g.size() {
@@ -178,6 +233,9 @@ pub fn rule3(
                     .sum::<Weight>();
 
             if uv >= sum {
+                dbg_trace_indent!(*k, "rule3 merge {:?}-{:?}", imap[u], imap[v]);
+                _final_path_debugs.push_str(&format!("rule3, merge {:?}-{:?}\n", imap[u], imap[v]));
+
                 merge(g, imap, k, edits, u, v);
                 applied = true;
             }
@@ -191,6 +249,7 @@ pub fn rule4(
     imap: &mut IndexMap,
     edits: &mut Vec<Edit>,
     k: &mut f32,
+    _final_path_debugs: &mut String,
 ) -> bool {
     let mut applied = false;
     // TODO: Think through if this doesn't do weird things if we already set some non-edges to
@@ -222,6 +281,8 @@ pub fn rule4(
         )
         .0;
     c.insert(first);
+
+    dbg_trace_indent!(*k, "Chose {:?} as first for rule4.", imap[first]);
 
     loop {
         let mut max = (usize::MAX, InfiniteNum::NEG_INFINITY, 0); // (vertex, connectivity, count of connected vertices in c)
@@ -258,13 +319,14 @@ pub fn rule4(
         if max.1 > second.1 * 2.0 {
             let k_c = min_cut(&g, &c, first);
 
+            // TODO: This probably double-counts every edge?
             let sum_neg_internal = c
                 .iter()
                 .map(|&u| {
                     c.iter()
                         .map(|&v| {
                             if u != v {
-                                g.get(u, v).max(Weight::ZERO).abs()
+                                g.get(u, v).min(Weight::ZERO).abs()
                             } else {
                                 Weight::ZERO
                             }
@@ -278,16 +340,27 @@ pub fn rule4(
                 .map(|&u| {
                     g.nodes()
                         .filter(|v| !c.contains(v))
-                        .map(|v| g.get(u, v).min(Weight::ZERO))
+                        .map(|v| g.get(u, v).max(Weight::ZERO))
                         .sum::<Weight>()
                 })
                 .sum::<Weight>();
 
             if k_c > sum_neg_internal + sum_pos_crossing {
-                let mut nodes = c.into_iter();
-                let first = nodes.next().unwrap();
-                for v in nodes {
-                    merge(g, imap, k, edits, first, v);
+                for &v in &c {
+                    if v != first {
+                        dbg_trace_indent!(
+                            *k,
+                            "rule4 merge. first {:?} - v {:?}, edits so far {:?}",
+                            imap[first],
+                            imap[v],
+                            edits
+                        );
+
+                        _final_path_debugs
+                            .push_str(&format!("rule4, merge {:?}-{:?}\n", imap[first], imap[v]));
+
+                        merge(g, imap, k, edits, first, v);
+                    }
                 }
                 applied = true;
                 break;
@@ -312,7 +385,9 @@ pub fn rule5(
     imap: &mut IndexMap,
     edits: &mut Vec<Edit>,
     k: &mut f32,
+    _final_path_debugs: &mut String,
 ) -> bool {
+    #[derive(Clone)]
     struct R5Data {
         delta_u: Weight,
         delta_v: Weight,
@@ -327,18 +402,6 @@ pub fn rule5(
         let mut max_x = Weight::ZERO;
         let mut relative_difference = Weight::ZERO;
         let mut relevant_pairs = Vec::new();
-
-        // Notes for next time:
-        // Iterate over all the other nodes here.
-        // PEACE does this in three separate loops, but the only reason seems to be to always know
-        // the order of u, v, and w to access the triangle matrix more efficiently, whatever.
-        // The first loop is subtly different than the other 2 in one case, but if my analysis is
-        // right that's inconsequential (amounts to doing a += 0 vs doing nothing).
-        // Caution: There's a `rel_differenz += -forbidden` in there that should likely be a
-        // `rel-differenz = forbidden` (which appears in another similar location), since all the
-        // other stuff compares for equality :/
-
-        //log::warn!("Starting init compute for {:?} - {:?}", imap[u], imap[v]);
 
         for w in g.nodes() {
             if w == u || w == v {
@@ -493,7 +556,8 @@ pub fn rule5(
 
             if uv >= 0.5 * (d.relative_difference + d.delta_u + d.delta_v) {
                 // Can always merge, no need to compute the more expensive stuff
-                /*log::warn!(
+                dbg_trace_indent!(
+                    *k,
                     "merge before dynprog: {:?}-{:?}, uv {}, rel_diff {}, du {}, dv {}, edits so far: {:?}",
                     imap[u],
                     imap[v],
@@ -502,15 +566,31 @@ pub fn rule5(
                     d.delta_u,
                     d.delta_v,
                     edits
-                );*/
+                );
+                _final_path_debugs
+                    .push_str(&format!("rule5, early merge {:?}-{:?}\n", imap[u], imap[v]));
                 merge(g, imap, k, edits, u, v);
                 applied = true;
                 continue;
             }
 
+            let _d = d.clone();
             let max = compute_max(d, uv);
 
             if uv > max {
+                dbg_trace_indent!(
+                    *k,
+                    "merge after dynprog: {:?}-{:?}, uv {}, rel_diff {}, du {}, dv {}, max {}, edits so far: {:?}",
+                    imap[u],
+                    imap[v],
+                    uv,
+                    _d.relative_difference,
+                    _d.delta_u,
+                    _d.delta_v,
+                    max,
+                    edits
+                );
+                _final_path_debugs.push_str(&format!("rule5, merge {:?}-{:?}\n", imap[u], imap[v]));
                 merge(g, imap, k, edits, u, v);
                 applied = true;
                 continue;

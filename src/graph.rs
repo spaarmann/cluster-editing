@@ -97,18 +97,19 @@ impl<T: GraphWeight> Graph<T> {
         (g, imap)
     }
 
-    /// Creates a petgraph graph from this graph.
-    /// If the imap indicates the graph contains merged vertices, the merged vertex is assigned the
-    /// weight of the *first* vertex in its list, and the rest are discarded.
-    pub fn into_petgraph(&self, imap: Option<&IndexMap>) -> crate::PetGraph {
+    /// Creates a petgraph graph from this graph and an optional IndexMap.
+    pub fn into_petgraph(
+        &self,
+        imap: Option<&IndexMap>,
+    ) -> petgraph::Graph<Vec<usize>, T, petgraph::Undirected> {
         use petgraph::prelude::NodeIndex;
 
-        let mut pg = crate::PetGraph::with_capacity(self.size, 0);
+        let mut pg = petgraph::Graph::<_, _, _>::with_capacity(self.size, 0);
 
         let mut map = vec![NodeIndex::new(0); self.size];
         for u in 0..self.size {
             if self.present[u] {
-                map[u] = pg.add_node(imap.map(|m| *m[u].first().unwrap()).unwrap_or(u));
+                map[u] = pg.add_node(imap.map(|m| m[u].clone()).unwrap_or(vec![u]));
             }
         }
 
@@ -116,8 +117,9 @@ impl<T: GraphWeight> Graph<T> {
             if self.present[u] {
                 for v in (u + 1)..self.size {
                     if self.present[v] {
-                        if self.get_direct(u, v) > T::ZERO {
-                            pg.add_edge(map[u], map[v], 0);
+                        let uv = self.get_direct(u, v);
+                        if uv > T::ZERO {
+                            pg.add_edge(map[u], map[v], uv);
                         }
                     }
                 }

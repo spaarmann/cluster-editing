@@ -112,7 +112,11 @@ fn should_be_neighbors(g: &Graph<Weight>, c1: &CritClique, c2: &CritClique) -> b
 /// graph and merging all critical cliques into a single vertex.
 /// This assumes that the input graph is unweighted (i.e. all weights are +1 or -1 exactly). The
 /// reduced graph will be weighted however.
-pub fn merge_cliques(g: &Graph<Weight>, imap: &IndexMap) -> (Graph<Weight>, IndexMap) {
+pub fn merge_cliques(
+    g: &Graph<Weight>,
+    imap: &IndexMap,
+    _final_path_debugs: &mut String,
+) -> (Graph<Weight>, IndexMap) {
     let mut crit = build_crit_clique_graph(g);
 
     let mut crit_imap = IndexMap::empty(crit.graph.size());
@@ -133,6 +137,10 @@ pub fn merge_cliques(g: &Graph<Weight>, imap: &IndexMap) -> (Graph<Weight>, Inde
                 .flat_map(|v| imap[*v].iter().copied())
                 .collect(),
         );
+
+        if crit_imap[u].len() > 1 {
+            _final_path_debugs.push_str(&format!("critcliques, merged {:?}\n", crit_imap[u]));
+        }
     }
 
     (crit.graph, crit_imap)
