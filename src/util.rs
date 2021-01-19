@@ -12,18 +12,18 @@ macro_rules! log_indent {
 }
 
 macro_rules! dbg_trace_indent {
-    ($k:expr, $s:expr) => (
+    ($t:expr, $k:expr, $s:expr) => (
         #[cfg(not(release))]
         {
             log::log!(log::Level::Trace, concat!("{}[k={}]", $s),
-                "\t".repeat((unsafe { K_MAX - $k.max(0.0) }) as usize), $k);
+                "\t".repeat(($t.k_max - $k.max(0.0)) as usize), $k);
         }
     );
-    ($k:expr, $s:expr, $($arg:tt)+) => (
+    ($t:expr, $k:expr, $s:expr, $($arg:tt)+) => (
         #[cfg(not(release))]
         {
             log::log!(log::Level::Trace, concat!("{}[k={}]", $s),
-                "\t".repeat((unsafe { K_MAX - $k.max(0.0) }) as usize),
+                "\t".repeat(($t.k_max - $k.max(0.0)) as usize),
                 $k, $($arg)+);
         }
     )

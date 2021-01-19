@@ -1,78 +1,55 @@
 use crate::{
-    algo::{merge, Edit},
-    critical_cliques,
-    graph::{GraphWeight, IndexMap},
-    util::InfiniteNum,
-    Graph, Weight,
+    algo::ProblemInstance, critical_cliques, graph::GraphWeight, util::InfiniteNum, Graph, Weight,
 };
-
-use crate::algo::K_MAX;
 
 use std::collections::HashSet;
 
-/// Performs initial parameter-independent reduction on the graph. A new graph and corresponding IndexMap
-/// are returned, along with a list of edits performed. The reduction assumes an unweighted graph
-/// as input (i.e. one with only weights 1 and -1).
-/// The reduction may also allow placing a lower bounds on the optimal `k` parameter, which is also
-/// returned.
-pub fn initial_param_independent_reduction(
-    g: &Graph<Weight>,
-    imap: &IndexMap,
-    _final_path_debugs: &mut String,
-) -> (Graph<Weight>, IndexMap, Vec<Edit>, f32) {
+/// The reduction assumes an unweighted graph as input (i.e. one with only weights 1 and -1).
+pub fn initial_param_independent_reduction(p: &mut ProblemInstance) -> f32 {
     // Simply merging all critical cliques leads to a graph with at most 4 * k_opt vertices.
-    let (mut g, mut imap) = critical_cliques::merge_cliques(g, imap, _final_path_debugs);
-    let k_start = (g.size() / 4) as f32;
+    let (g, imap) = critical_cliques::merge_cliques(&p.g, &p.imap, &mut p.path_log);
+    p.g = g;
+    p.imap = imap;
 
-    let mut edits = Vec::new();
-    general_param_independent_reduction(
-        &mut g,
-        &mut imap,
-        &mut edits,
-        &mut 0.0,
-        _final_path_debugs,
-    );
+    let k_start = (p.g.size() / 4) as f32;
+
+    general_param_independent_reduction(p);
 
     // TODO: It would seem that merging steps above could potentially result in zero-edges in the
     // graph. The algorithm is generally described as requiring that *no* zero-edges are in the
     // input, so doesn't this pose a problem?
     // For now, this checks if we do ever produce any zero-edges and logs an error if so.
-    for u in 0..g.size() {
-        continue_if_not_present!(g, u);
-        for v in g.neighbors(u) {
-            if g.get(u, v).is_zero() {
+    for u in 0..p.g.size() {
+        continue_if_not_present!(p.g, u);
+        for v in p.g.neighbors(u) {
+            if p.g.get(u, v).is_zero() {
                 log::error!("Produced a zero-edge during parameter-independent reduction!");
             }
         }
     }
 
-    (g, imap, edits, k_start)
+    k_start
 }
 
 /// Rules from "Böcker et al., Exact Algorithms for Cluster Editing: Evaluation and
 /// Experiments", 2011
 /// Can be applied during the search as well, can modify `k` appropriately and don't require any
 /// specific form of the input.
-pub fn general_param_independent_reduction(
-    g: &mut Graph<Weight>,
-    imap: &mut IndexMap,
-    edits: &mut Vec<Edit>,
-    k: &mut f32,
-    _final_path_debugs: &mut String,
-) {
+pub fn general_param_independent_reduction(p: &mut ProblemInstance) {
     // TODO: Optimize at least rules 1-3 ! This is a super naive implementation, even the paper directly
     // describes a better strategy for doing it.
 
-    let _k_start = *k;
+    let _k_start = p.k;
     dbg_trace_indent!(
+        p,
         _k_start,
         "Starting gen-param-indep-reduction, k {}, edits {:?}.",
-        k,
-        edits
+        p.k,
+        p.edits
     );
 
     let mut applied_any_rule = true;
-    while applied_any_rule && *k > 0.0 {
+    while applied_any_rule && p.k > 0.0 {
         applied_any_rule = false;
 
         let r5 = true;
@@ -83,26 +60,26 @@ pub fn general_param_independent_reduction(
 
         // Rule 1 (heavy non-edge rule)
         if r1 {
-            applied_any_rule |= rule1(g, imap, k, _final_path_debugs);
+            applied_any_rule |= rule1(p);
         }
 
         // Rule 2 (heavy edge rule, single end)
         if r2 {
-            applied_any_rule |= rule2(g, imap, edits, k, _final_path_debugs);
+            applied_any_rule |= rule2(p);
         }
 
         // Rule 3 (heavy edge rule, both ends)
         if r3 {
-            applied_any_rule |= rule3(g, imap, edits, k, _final_path_debugs);
+            applied_any_rule |= rule3(p);
         }
 
-        if g.present_node_count() <= 1 {
+        if p.g.present_node_count() <= 1 {
             break;
         }
 
         // Rule 4
         if r4 {
-            applied_any_rule |= rule4(g, imap, edits, k, _final_path_debugs);
+            applied_any_rule |= rule4(p);
         }
 
         // Try Rule 5 only if no other rules could be applied
@@ -112,24 +89,21 @@ pub fn general_param_independent_reduction(
 
         // Rule 5
         if r5 {
-            applied_any_rule = rule5(g, imap, edits, k, _final_path_debugs);
+            applied_any_rule = rule5(p);
         }
     }
 
     dbg_trace_indent!(
+        p,
         _k_start,
         "Finished gen-param-indep-reduction, {}, edits {:?}.",
-        k,
-        edits
+        p.k,
+        p.edits
     );
 }
 
-pub fn rule1(
-    g: &mut Graph<Weight>,
-    imap: &IndexMap,
-    k: &f32,
-    _final_path_debugs: &mut String,
-) -> bool {
+pub fn rule1(p: &mut ProblemInstance) -> bool {
+    let g = &mut p.g;
     let mut applied = false;
     for u in 0..g.size() {
         continue_if_not_present!(g, u);
@@ -146,9 +120,11 @@ pub fn rule1(
 
             let sum = g.neighbors(u).map(|w| g.get(u, w)).sum();
             if -uv >= sum {
-                _final_path_debugs
-                    .push_str(&format!("rule1, forbidding {:?}-{:?}\n", imap[u], imap[v]));
-                dbg_trace_indent!(*k, "rule1, forbidding {:?}-{:?}", imap[u], imap[v]);
+                p.path_log.push_str(&format!(
+                    "rule1, forbidding {:?}-{:?}\n",
+                    p.imap[u], p.imap[v]
+                ));
+                dbg_trace_indent!(p, p.k, "rule1, forbidding {:?}-{:?}", p.imap[u], p.imap[v]);
 
                 g.set(u, v, InfiniteNum::NEG_INFINITY);
                 applied = true;
@@ -158,43 +134,38 @@ pub fn rule1(
     applied
 }
 
-pub fn rule2(
-    g: &mut Graph<Weight>,
-    imap: &mut IndexMap,
-    edits: &mut Vec<Edit>,
-    k: &mut f32,
-    _final_path_debugs: &mut String,
-) -> bool {
+pub fn rule2(p: &mut ProblemInstance) -> bool {
     let mut applied = false;
-    for u in 0..g.size() {
-        continue_if_not_present!(g, u);
-        for v in 0..g.size() {
+    for u in 0..p.g.size() {
+        continue_if_not_present!(p.g, u);
+        for v in 0..p.g.size() {
             if u == v {
                 continue;
             }
-            continue_if_not_present!(g, v);
+            continue_if_not_present!(p.g, v);
 
-            let uv = g.get(u, v);
+            let uv = p.g.get(u, v);
             if uv <= Weight::ZERO {
                 continue;
             }
 
-            let sum = g
-                .nodes()
-                .filter_map(|w| {
-                    if u == w || v == w {
-                        None
-                    } else {
-                        Some(g.get(u, w).abs())
-                    }
-                })
-                .sum();
+            let sum =
+                p.g.nodes()
+                    .filter_map(|w| {
+                        if u == w || v == w {
+                            None
+                        } else {
+                            Some(p.g.get(u, w).abs())
+                        }
+                    })
+                    .sum();
 
             if uv >= sum {
-                dbg_trace_indent!(*k, "rule2 merge {:?}-{:?}", imap[u], imap[v]);
-                _final_path_debugs.push_str(&format!("rule2, merge {:?}-{:?}\n", imap[u], imap[v]));
+                dbg_trace_indent!(p, p.k, "rule2 merge {:?}-{:?}", p.imap[u], p.imap[v]);
+                p.path_log
+                    .push_str(&format!("rule2, merge {:?}-{:?}\n", p.imap[u], p.imap[v]));
 
-                merge(g, imap, k, edits, u, v);
+                p.merge(u, v);
                 applied = true;
             }
         }
@@ -202,39 +173,35 @@ pub fn rule2(
     applied
 }
 
-pub fn rule3(
-    g: &mut Graph<Weight>,
-    imap: &mut IndexMap,
-    edits: &mut Vec<Edit>,
-    k: &mut f32,
-    _final_path_debugs: &mut String,
-) -> bool {
+pub fn rule3(p: &mut ProblemInstance) -> bool {
     let mut applied = false;
-    for u in 0..g.size() {
-        continue_if_not_present!(g, u);
+    for u in 0..p.g.size() {
+        continue_if_not_present!(p.g, u);
         // This rule is already "symmetric" so we only go through pairs in one order, not
         // either order.
-        for v in (u + 1)..g.size() {
-            continue_if_not_present!(g, v);
+        for v in (u + 1)..p.g.size() {
+            continue_if_not_present!(p.g, v);
 
-            let uv = g.get_direct(u, v);
+            let uv = p.g.get_direct(u, v);
             if uv <= Weight::ZERO {
                 continue;
             }
 
-            let sum = g
-                .neighbors(u)
-                .map(|w| if w == v { Weight::ZERO } else { g.get(u, w) })
-                .sum::<Weight>()
-                + g.neighbors(v)
-                    .map(|w| if w == u { Weight::ZERO } else { g.get(v, w) })
-                    .sum::<Weight>();
+            let sum =
+                p.g.neighbors(u)
+                    .map(|w| if w == v { Weight::ZERO } else { p.g.get(u, w) })
+                    .sum::<Weight>()
+                    + p.g
+                        .neighbors(v)
+                        .map(|w| if w == u { Weight::ZERO } else { p.g.get(v, w) })
+                        .sum::<Weight>();
 
             if uv >= sum {
-                dbg_trace_indent!(*k, "rule3 merge {:?}-{:?}", imap[u], imap[v]);
-                _final_path_debugs.push_str(&format!("rule3, merge {:?}-{:?}\n", imap[u], imap[v]));
+                dbg_trace_indent!(p, p.k, "rule3 merge {:?}-{:?}", p.imap[u], p.imap[v]);
+                p.path_log
+                    .push_str(&format!("rule3, merge {:?}-{:?}\n", p.imap[u], p.imap[v]));
 
-                merge(g, imap, k, edits, u, v);
+                p.merge(u, v);
                 applied = true;
             }
         }
@@ -242,13 +209,8 @@ pub fn rule3(
     applied
 }
 
-pub fn rule4(
-    g: &mut Graph<Weight>,
-    imap: &mut IndexMap,
-    edits: &mut Vec<Edit>,
-    k: &mut f32,
-    _final_path_debugs: &mut String,
-) -> bool {
+pub fn rule4(p: &mut ProblemInstance) -> bool {
+    let g = &mut p.g;
     let mut applied = false;
     // TODO: Think through if this doesn't do weird things if we already set some non-edges to
     // NEG_INFINITY
@@ -345,17 +307,20 @@ pub fn rule4(
                 for &v in &c {
                     if v != first {
                         dbg_trace_indent!(
-                            *k,
+                            p,
+                            p.k,
                             "rule4 merge. first {:?} - v {:?}, edits so far {:?}",
-                            imap[first],
-                            imap[v],
-                            edits
+                            p.imap[first],
+                            p.imap[v],
+                            p.edits
                         );
 
-                        _final_path_debugs
-                            .push_str(&format!("rule4, merge {:?}-{:?}\n", imap[first], imap[v]));
+                        p.path_log.push_str(&format!(
+                            "rule4, merge {:?}-{:?}\n",
+                            p.imap[first], p.imap[v]
+                        ));
 
-                        merge(g, imap, k, edits, first, v);
+                        p.merge(first, v);
                     }
                 }
                 applied = true;
@@ -376,13 +341,7 @@ pub fn rule4(
     applied
 }
 
-pub fn rule5(
-    g: &mut Graph<Weight>,
-    imap: &mut IndexMap,
-    edits: &mut Vec<Edit>,
-    k: &mut f32,
-    _final_path_debugs: &mut String,
-) -> bool {
+pub fn rule5(p: &mut ProblemInstance) -> bool {
     #[derive(Clone)]
     struct R5Data {
         delta_u: Weight,
@@ -528,18 +487,18 @@ pub fn rule5(
 
     let mut applied = false;
 
-    for u in 0..g.size() {
-        continue_if_not_present!(g, u);
+    for u in 0..p.g.size() {
+        continue_if_not_present!(p.g, u);
 
-        for v in (u + 1)..g.size() {
-            continue_if_not_present!(g, v);
+        for v in (u + 1)..p.g.size() {
+            continue_if_not_present!(p.g, v);
 
-            let uv = g.get_direct(u, v);
+            let uv = p.g.get_direct(u, v);
             if uv <= Weight::ZERO {
                 continue;
             }
 
-            let d = compute_initial_data(g, u, v);
+            let d = compute_initial_data(&p.g, u, v);
 
             if uv <= Weight::min(d.delta_u, d.delta_v) {
                 // No chance of satisfying condition
@@ -549,19 +508,22 @@ pub fn rule5(
             if uv >= 0.5 * (d.relative_difference + d.delta_u + d.delta_v) {
                 // Can always merge, no need to compute the more expensive stuff
                 dbg_trace_indent!(
-                    *k,
+                    p,
+                    p.k,
                     "merge before dynprog: {:?}-{:?}, uv {}, rel_diff {}, du {}, dv {}, edits so far: {:?}",
-                    imap[u],
-                    imap[v],
+                    p.imap[u],
+                    p.imap[v],
                     uv,
                     d.relative_difference,
                     d.delta_u,
                     d.delta_v,
-                    edits
+                    p.edits
                 );
-                _final_path_debugs
-                    .push_str(&format!("rule5, early merge {:?}-{:?}\n", imap[u], imap[v]));
-                merge(g, imap, k, edits, u, v);
+                p.path_log.push_str(&format!(
+                    "rule5, early merge {:?}-{:?}\n",
+                    p.imap[u], p.imap[v]
+                ));
+                p.merge(u, v);
                 applied = true;
                 continue;
             }
@@ -571,19 +533,21 @@ pub fn rule5(
 
             if uv > max {
                 dbg_trace_indent!(
-                    *k,
+                    p,
+                    p.k,
                     "merge after dynprog: {:?}-{:?}, uv {}, rel_diff {}, du {}, dv {}, max {}, edits so far: {:?}",
-                    imap[u],
-                    imap[v],
+                    p.imap[u],
+                    p.imap[v],
                     uv,
                     _d.relative_difference,
                     _d.delta_u,
                     _d.delta_v,
                     max,
-                    edits
+                    p.edits
                 );
-                _final_path_debugs.push_str(&format!("rule5, merge {:?}-{:?}\n", imap[u], imap[v]));
-                merge(g, imap, k, edits, u, v);
+                p.path_log
+                    .push_str(&format!("rule5, merge {:?}-{:?}\n", p.imap[u], p.imap[v]));
+                p.merge(u, v);
                 applied = true;
                 continue;
             }

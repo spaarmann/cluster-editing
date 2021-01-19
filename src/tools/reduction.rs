@@ -47,10 +47,17 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         for c in components.into_iter() {
             let (cg, imap) = c;
-            let (reduced, _, _, _) =
-                reduction::initial_param_independent_reduction(&cg, &imap, &mut String::new());
+            let mut instance = cluster_editing::algo::ProblemInstance {
+                g: cg,
+                imap,
+                k: f32::MAX,
+                k_max: f32::MAX,
+                edits: Vec::new(),
+                path_log: String::new(),
+            };
+            reduction::initial_param_independent_reduction(&mut instance);
 
-            after += reduced.present_node_count();
+            after += instance.g.present_node_count();
         }
 
         *reduction_amounts.entry(before - after).or_default() += 1;
