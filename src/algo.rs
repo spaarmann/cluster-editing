@@ -145,7 +145,8 @@ pub fn find_optimal_cluster_editing(g: &Graph<Weight>, imap: &IndexMap) -> (i32,
     loop {
         info!("[driver] Starting search with k={}...", k);
 
-        let instance = instance.fork_new_branch();
+        let mut instance = instance.fork_new_branch();
+        instance.k = k;
         if let Some(instance) = instance.find_cluster_editing() {
             if !instance.path_log.is_empty() {
                 log::info!("Final path debug log:\n{}", instance.path_log);
