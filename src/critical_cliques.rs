@@ -123,10 +123,11 @@ pub fn merge_cliques(
 
     for u in 0..crit.graph.size() {
         for v in (u + 1)..crit.graph.size() {
-            let uv = crit.graph.get_mut_direct(u, v);
+            //let uv = crit.graph.get_mut_direct(u, v);
+            let uv = crit.graph.get(u, v);
             let sign = uv.signum();
             let weight = crit.cliques[u].vertices.len() * crit.cliques[v].vertices.len();
-            *uv = (weight as Weight) * sign;
+            crit.graph.set(u, v, (weight as Weight) * sign);
         }
 
         crit_imap.set(

@@ -51,8 +51,8 @@ pub struct Graph<T: GraphWeight> {
     /// Any users of this struct that iterate manually over some index range must check themself
     /// whether a vertex is removed, using `.is_present(u)`.
     present: Vec<bool>,
-    /// Stores a mapping from row index to the starting index of that row in the `matrix` list.
-    row_offsets: Vec<usize>,
+    // Stores a mapping from row index to the starting index of that row in the `matrix` list.
+    //row_offsets: Vec<usize>,
 }
 
 impl<T: GraphWeight> Graph<T> {
@@ -60,20 +60,20 @@ impl<T: GraphWeight> Graph<T> {
     /// -1.0.
     pub fn new(size: usize) -> Self {
         assert!(size > 0);
-        let mat_size = (size * (size - 1) / 2) as usize;
+        let mat_size = size * size; //(size * (size - 1) / 2) as usize;
 
-        let row_offsets =
-            // Row 0 does not exist, so use a marker value that will definitely panic if any code
-            // tries to index using it.
-            std::iter::once(usize::MAX)
-            // For all other rows, calculate the correct offset.
-            .chain((1..size).map(|i| i * (i - 1) / 2))
-            .collect();
+        /*let row_offsets =
+        // Row 0 does not exist, so use a marker value that will definitely panic if any code
+        // tries to index using it.
+        std::iter::once(usize::MAX)
+        // For all other rows, calculate the correct offset.
+        .chain((1..size).map(|i| i * (i - 1) / 2))
+        .collect();*/
         Graph {
             size,
             matrix: vec![T::NEG_ONE; mat_size],
             present: vec![true; size],
-            row_offsets,
+            //row_offsets,
         }
     }
 
@@ -136,11 +136,12 @@ impl<T: GraphWeight> Graph<T> {
         debug_assert!(self.present[v]);
         assert_ne!(u, v);
 
-        if u < v {
+        /*if u < v {
             self.matrix[self.row_offsets[v] + u]
         } else {
             self.matrix[self.row_offsets[u] + v]
-        }
+        }*/
+        self.matrix[u + self.size * v]
     }
 
     /// Get the weight associated with pair `(u, v)`.
@@ -150,16 +151,17 @@ impl<T: GraphWeight> Graph<T> {
         debug_assert!(self.present[v]);
         assert_ne!(u, v);
 
-        if u < v {
+        /*if u < v {
             &self.matrix[self.row_offsets[v] + u]
         } else {
             &self.matrix[self.row_offsets[u] + v]
-        }
+        }*/
+        &self.matrix[u + self.size * v]
     }
 
     /// Get a mutable reference to the weight associated with pair `(u, v)`.
     /// u and v can be in any order, panics if `u == v`.
-    pub fn get_mut(&mut self, u: usize, v: usize) -> &mut T {
+    /*pub fn get_mut(&mut self, u: usize, v: usize) -> &mut T {
         debug_assert!(self.present[u]);
         debug_assert!(self.present[v]);
         assert_ne!(u, v);
@@ -169,7 +171,7 @@ impl<T: GraphWeight> Graph<T> {
         } else {
             &mut self.matrix[self.row_offsets[u] + v]
         }
-    }
+    }*/
 
     /// Set the weight associated with pair `(u, v)`.
     /// u and v can be in any order, panics if `u == v`.
@@ -178,36 +180,42 @@ impl<T: GraphWeight> Graph<T> {
         debug_assert!(self.present[v]);
         assert_ne!(u, v);
 
-        if u < v {
+        /*if u < v {
             self.matrix[self.row_offsets[v] + u] = w;
         } else {
             self.matrix[self.row_offsets[u] + v] = w;
-        }
+        }*/
+        self.matrix[u + self.size * v] = w;
+        self.matrix[v + self.size * u] = w;
     }
 
     /// Like `get`, but assumes `u != v` and `u < v` instead of checking both.
     pub fn get_direct(&self, u: usize, v: usize) -> T {
         debug_assert!(self.present[u]);
         debug_assert!(self.present[v]);
-        self.matrix[self.row_offsets[v] + u]
+        //self.matrix[self.row_offsets[v] + u]
+        self.matrix[u + self.size * v]
     }
     /// Like `get_ref`, but assumes `u != v` and `u < v` instead of checking both.
     pub fn get_ref_direct(&self, u: usize, v: usize) -> &T {
         debug_assert!(self.present[u]);
         debug_assert!(self.present[v]);
-        &self.matrix[self.row_offsets[v] + u]
+        //&self.matrix[self.row_offsets[v] + u]
+        &self.matrix[u + self.size * v]
     }
     /// Like `get_mut`, but assumes `u != v` and `u < v` instead of checking both.
-    pub fn get_mut_direct(&mut self, u: usize, v: usize) -> &mut T {
+    /*pub fn get_mut_direct(&mut self, u: usize, v: usize) -> &mut T {
         debug_assert!(self.present[u]);
         debug_assert!(self.present[v]);
         &mut self.matrix[self.row_offsets[v] + u]
-    }
+    }*/
     /// Like `set`, but assumes `u != v` and `u < v` instead of checking both.
     pub fn set_direct(&mut self, u: usize, v: usize, w: T) {
         debug_assert!(self.present[u]);
         debug_assert!(self.present[v]);
-        self.matrix[self.row_offsets[v] + u] = w;
+        //self.matrix[self.row_offsets[v] + u] = w;
+        self.matrix[u + self.size * v] = w;
+        self.matrix[v + self.size * u] = w;
     }
 
     /// Returns an iterator over the open neighborhood of `u` (i.e., not including `u` itself). The
@@ -335,12 +343,12 @@ impl<T: GraphWeight> std::ops::Index<(usize, usize)> for Graph<T> {
     }
 }
 
-impl<T: GraphWeight> std::ops::IndexMut<(usize, usize)> for Graph<T> {
+/*impl<T: GraphWeight> std::ops::IndexMut<(usize, usize)> for Graph<T> {
     /// Semantics equivalent to `Graph::get_mut`.
     fn index_mut(&mut self, (u, v): (usize, usize)) -> &mut Self::Output {
         self.get_mut(u, v)
     }
-}
+}*/
 
 /// Companion to the `Graph` struct for remapping to different indices.
 ///

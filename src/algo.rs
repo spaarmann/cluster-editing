@@ -373,10 +373,11 @@ impl ProblemInstance {
         // 1. Set uv to forbidden
         let res1 = {
             let mut branched = self.fork_new_branch();
-            let uv = branched.g.get_mut(u, v);
+            //let uv = branched.g.get_mut(u, v);
+            let uv = branched.g.get(u, v);
             // TODO: Might not need this check after edge merging is in? Maybe?
             if uv.is_finite() {
-                branched.k = self.k - *uv as f32;
+                branched.k = self.k - uv as f32;
 
                 if branched.k >= 0.0 {
                     dbg_trace_indent!(
@@ -393,7 +394,7 @@ impl ProblemInstance {
                     ));
 
                     Edit::delete(&mut branched.edits, &branched.imap, u, v);
-                    *uv = InfiniteNum::NEG_INFINITY;
+                    branched.g.set(u, v, InfiniteNum::NEG_INFINITY);
 
                     branched.find_cluster_editing()
                 } else {
@@ -414,7 +415,8 @@ impl ProblemInstance {
         // 2. Merge uv
         let res2 = {
             let mut branched = self.fork_new_branch();
-            let uv = branched.g.get_mut(u, v);
+            //let uv = branched.g.get_mut(u, v);
+            let uv = branched.g.get(u, v);
             // TODO: Might not need this check after edge merging is in? Maybe?
             if uv.is_finite() {
                 branched.path_log.push_str(&format!(
