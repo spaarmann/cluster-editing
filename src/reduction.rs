@@ -182,7 +182,7 @@ pub fn rule3(p: &mut ProblemInstance) -> bool {
         for v in (u + 1)..p.g.size() {
             continue_if_not_present!(p.g, v);
 
-            let uv = p.g.get_direct(u, v);
+            let uv = p.g.get(u, v);
             if uv <= Weight::ZERO {
                 continue;
             }
@@ -493,7 +493,7 @@ pub fn rule5(p: &mut ProblemInstance) -> bool {
         for v in (u + 1)..p.g.size() {
             continue_if_not_present!(p.g, v);
 
-            let uv = p.g.get_direct(u, v);
+            let uv = p.g.get(u, v);
             if uv <= Weight::ZERO {
                 continue;
             }

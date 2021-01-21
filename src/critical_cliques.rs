@@ -32,7 +32,7 @@ impl CritCliqueGraph {
 
         for u in 0..self.graph.size() {
             for v in (u + 1)..self.graph.size() {
-                if self.graph.get_direct(u, v) > Weight::ZERO {
+                if self.graph.get(u, v) > Weight::ZERO {
                     pg.add_edge(NodeIndex::new(u), NodeIndex::new(v), 0);
                 }
             }

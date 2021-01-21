@@ -31,17 +31,7 @@ impl GraphWeight for i32 {
 #[derive(Clone, Debug)]
 pub struct Graph<T: GraphWeight> {
     size: usize,
-    /// The graph is internally stored as a linearized triangular matrix.
-    /// An example matrix for a graph with four vertices might look like this:
-    /// ```txt
-    ///     u v w x
-    ///   +--------
-    /// u | - - - -
-    /// v | a - - -
-    /// w | b c - -
-    /// x | d e f -
-    /// ```
-    /// This would be stored as `[a, b, c, d, e, f]` in the `matrix` field.
+    /// The graph is internally stored as a full square matrix for each node pair.
     matrix: Vec<T>,
     /// The data structure is treated as very fixed-size at the moment, but on order to efficiently
     /// merge vertices in the algorithm, it is possible to mark vertices as "removed"/not-present.
@@ -51,8 +41,6 @@ pub struct Graph<T: GraphWeight> {
     /// Any users of this struct that iterate manually over some index range must check themself
     /// whether a vertex is removed, using `.is_present(u)`.
     present: Vec<bool>,
-    // Stores a mapping from row index to the starting index of that row in the `matrix` list.
-    //row_offsets: Vec<usize>,
 }
 
 impl<T: GraphWeight> Graph<T> {
@@ -60,20 +48,12 @@ impl<T: GraphWeight> Graph<T> {
     /// -1.0.
     pub fn new(size: usize) -> Self {
         assert!(size > 0);
-        let mat_size = size * size; //(size * (size - 1) / 2) as usize;
+        let mat_size = size * size;
 
-        /*let row_offsets =
-        // Row 0 does not exist, so use a marker value that will definitely panic if any code
-        // tries to index using it.
-        std::iter::once(usize::MAX)
-        // For all other rows, calculate the correct offset.
-        .chain((1..size).map(|i| i * (i - 1) / 2))
-        .collect();*/
         Graph {
             size,
             matrix: vec![T::NEG_ONE; mat_size],
             present: vec![true; size],
-            //row_offsets,
         }
     }
 
@@ -117,7 +97,7 @@ impl<T: GraphWeight> Graph<T> {
             if self.present[u] {
                 for v in (u + 1)..self.size {
                     if self.present[v] {
-                        let uv = self.get_direct(u, v);
+                        let uv = self.get(u, v);
                         if uv > T::ZERO {
                             pg.add_edge(map[u], map[v], uv);
                         }
@@ -136,11 +116,6 @@ impl<T: GraphWeight> Graph<T> {
         debug_assert!(self.present[v]);
         assert_ne!(u, v);
 
-        /*if u < v {
-            self.matrix[self.row_offsets[v] + u]
-        } else {
-            self.matrix[self.row_offsets[u] + v]
-        }*/
         self.matrix[u + self.size * v]
     }
 
@@ -151,27 +126,8 @@ impl<T: GraphWeight> Graph<T> {
         debug_assert!(self.present[v]);
         assert_ne!(u, v);
 
-        /*if u < v {
-            &self.matrix[self.row_offsets[v] + u]
-        } else {
-            &self.matrix[self.row_offsets[u] + v]
-        }*/
         &self.matrix[u + self.size * v]
     }
-
-    /// Get a mutable reference to the weight associated with pair `(u, v)`.
-    /// u and v can be in any order, panics if `u == v`.
-    /*pub fn get_mut(&mut self, u: usize, v: usize) -> &mut T {
-        debug_assert!(self.present[u]);
-        debug_assert!(self.present[v]);
-        assert_ne!(u, v);
-
-        if u < v {
-            &mut self.matrix[self.row_offsets[v] + u]
-        } else {
-            &mut self.matrix[self.row_offsets[u] + v]
-        }
-    }*/
 
     /// Set the weight associated with pair `(u, v)`.
     /// u and v can be in any order, panics if `u == v`.
@@ -180,66 +136,34 @@ impl<T: GraphWeight> Graph<T> {
         debug_assert!(self.present[v]);
         assert_ne!(u, v);
 
-        /*if u < v {
-            self.matrix[self.row_offsets[v] + u] = w;
-        } else {
-            self.matrix[self.row_offsets[u] + v] = w;
-        }*/
-        self.matrix[u + self.size * v] = w;
-        self.matrix[v + self.size * u] = w;
-    }
-
-    /// Like `get`, but assumes `u != v` and `u < v` instead of checking both.
-    pub fn get_direct(&self, u: usize, v: usize) -> T {
-        debug_assert!(self.present[u]);
-        debug_assert!(self.present[v]);
-        //self.matrix[self.row_offsets[v] + u]
-        self.matrix[u + self.size * v]
-    }
-    /// Like `get_ref`, but assumes `u != v` and `u < v` instead of checking both.
-    pub fn get_ref_direct(&self, u: usize, v: usize) -> &T {
-        debug_assert!(self.present[u]);
-        debug_assert!(self.present[v]);
-        //&self.matrix[self.row_offsets[v] + u]
-        &self.matrix[u + self.size * v]
-    }
-    /// Like `get_mut`, but assumes `u != v` and `u < v` instead of checking both.
-    /*pub fn get_mut_direct(&mut self, u: usize, v: usize) -> &mut T {
-        debug_assert!(self.present[u]);
-        debug_assert!(self.present[v]);
-        &mut self.matrix[self.row_offsets[v] + u]
-    }*/
-    /// Like `set`, but assumes `u != v` and `u < v` instead of checking both.
-    pub fn set_direct(&mut self, u: usize, v: usize, w: T) {
-        debug_assert!(self.present[u]);
-        debug_assert!(self.present[v]);
-        //self.matrix[self.row_offsets[v] + u] = w;
         self.matrix[u + self.size * v] = w;
         self.matrix[v + self.size * u] = w;
     }
 
     /// Returns an iterator over the open neighborhood of `u` (i.e., not including `u` itself). The
     /// neighbors are guaranteed to be in ascending order.
+    // TODO: There might not be much point anymore in guaranteeing ascending order since the matrix
+    // is not triangular anymore.
     pub fn neighbors(&self, u: usize) -> impl Iterator<Item = usize> + '_ {
         debug_assert!(self.present[u]);
         (0..u)
-            .filter(move |&v| self.present[v] && self.get_direct(v, u) > T::ZERO)
+            .filter(move |&v| self.present[v] && self.get(v, u) > T::ZERO)
             .chain(
-                ((u + 1)..self.size)
-                    .filter(move |&v| self.present[v] && self.get_direct(u, v) > T::ZERO),
+                ((u + 1)..self.size).filter(move |&v| self.present[v] && self.get(u, v) > T::ZERO),
             )
     }
 
     /// Returns an iterator over the closed neighborhood of `u` (i.e., including `u` itself). The
     /// neighbors are guaranteed to be in ascending order.
+    // TODO: There might not be much point anymore in guaranteeing ascending order since the matrix
+    // is not triangular anymore.
     pub fn closed_neighbors(&self, u: usize) -> impl Iterator<Item = usize> + '_ {
         debug_assert!(self.present[u]);
         (0..u)
-            .filter(move |&v| self.present[v] && self.get_direct(v, u) > T::ZERO)
+            .filter(move |&v| self.present[v] && self.get(v, u) > T::ZERO)
             .chain(std::iter::once(u))
             .chain(
-                ((u + 1)..self.size)
-                    .filter(move |&v| self.present[v] && self.get_direct(u, v) > T::ZERO),
+                ((u + 1)..self.size).filter(move |&v| self.present[v] && self.get(u, v) > T::ZERO),
             )
     }
 
@@ -262,12 +186,6 @@ impl<T: GraphWeight> Graph<T> {
         debug_assert!(self.present[u]);
         debug_assert!(self.present[v]);
         self.get(u, v) > T::ZERO
-    }
-
-    pub fn has_edge_direct(&self, u: usize, v: usize) -> bool {
-        debug_assert!(self.present[u]);
-        debug_assert!(self.present[v]);
-        self.get_direct(u, v) > T::ZERO
     }
 
     pub fn is_present(&self, u: usize) -> bool {
@@ -342,13 +260,6 @@ impl<T: GraphWeight> std::ops::Index<(usize, usize)> for Graph<T> {
         self.get_ref(u, v)
     }
 }
-
-/*impl<T: GraphWeight> std::ops::IndexMut<(usize, usize)> for Graph<T> {
-    /// Semantics equivalent to `Graph::get_mut`.
-    fn index_mut(&mut self, (u, v): (usize, usize)) -> &mut Self::Output {
-        self.get_mut(u, v)
-    }
-}*/
 
 /// Companion to the `Graph` struct for remapping to different indices.
 ///

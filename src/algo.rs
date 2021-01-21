@@ -250,7 +250,7 @@ impl ProblemInstance {
                     for v in (u + 1)..self.g.size() {
                         continue_if_not_present!(self.g, v);
                         if component_map[u] != component_map[v] {
-                            if self.g.get_direct(u, v) == Weight::ZERO {
+                            if self.g.get(u, v) == Weight::ZERO {
                                 zero_count += 1.0;
                             }
                         }
@@ -330,7 +330,7 @@ impl ProblemInstance {
                     continue_if_not_present!(self.g, u);
                     for v in (u + 1)..self.g.size() {
                         continue_if_not_present!(self.g, v);
-                        if self.g.get_direct(u, v).is_zero() {
+                        if self.g.get(u, v).is_zero() {
                             zero_count += 1.0;
                         }
                     }
