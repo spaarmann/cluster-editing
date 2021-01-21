@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use log::info;
 use structopt::StructOpt;
+use typed_arena::Arena;
 
 #[derive(Debug, StructOpt)]
 #[structopt(
@@ -60,8 +61,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     if let Some(path) = opt.print_cliques {
-        let (graph, _) = Graph::new_from_petgraph(&graph);
-        let crit_graph = cluster_editing::critical_cliques::build_crit_clique_graph(&graph);
+        let arena = Arena::new();
+        let (graph, _) = Graph::new_from_petgraph(&graph, &arena);
+        let crit_graph = cluster_editing::critical_cliques::build_crit_clique_graph(&graph, &arena);
         graphviz::print_graph(&opt.print_command, path, &crit_graph.into_petgraph());
     }
 

@@ -1,4 +1,6 @@
-pub trait GraphWeight: PartialOrd + Copy {
+use typed_arena::Arena;
+
+pub trait GraphWeight: PartialOrd + Clone + Copy {
     const ZERO: Self;
     const ONE: Self;
     const NEG_ONE: Self;
@@ -28,11 +30,11 @@ impl GraphWeight for i32 {
 /// Edges have weights >0, non-edges have weights <0.
 ///
 /// Accessing self-loop weights will panic!
-#[derive(Clone, Debug)]
-pub struct Graph<T: GraphWeight> {
+#[derive(Debug)]
+pub struct Graph<'a, T: GraphWeight> {
     size: usize,
     /// The graph is internally stored as a full square matrix for each node pair.
-    matrix: Vec<T>,
+    matrix: &'a mut [T],
     /// The data structure is treated as very fixed-size at the moment, but on order to efficiently
     /// merge vertices in the algorithm, it is possible to mark vertices as "removed"/not-present.
     /// Such vertices will not be returned as part of any neighbor-sets etc. Accessing the weight
@@ -43,17 +45,26 @@ pub struct Graph<T: GraphWeight> {
     present: Vec<bool>,
 }
 
-impl<T: GraphWeight> Graph<T> {
+impl<'a, T: GraphWeight> Graph<'a, T> {
     /// Creates a new empty (without any edges) graph with `size` vertices, with all weights set to
     /// -1.0.
-    pub fn new(size: usize) -> Self {
+    pub fn new(size: usize, arena: &'a Arena<T>) -> Self {
         assert!(size > 0);
         let mat_size = size * size;
+        let matrix = arena.alloc_extend(std::iter::repeat(T::NEG_ONE).take(mat_size));
 
         Graph {
             size,
-            matrix: vec![T::NEG_ONE; mat_size],
+            matrix,
             present: vec![true; size],
+        }
+    }
+
+    pub fn clone_in<'b>(&'a self, arena: &'b Arena<T>) -> Graph<'b, T> {
+        Graph {
+            size: self.size,
+            matrix: arena.alloc_extend(self.matrix.iter().copied()),
+            present: self.present.clone(),
         }
     }
 
@@ -61,8 +72,8 @@ impl<T: GraphWeight> Graph<T> {
     /// given weight 1, non-edges are given weight -1.
     /// A corresponding `IndexMap` is created that maps vertex indices from the returned graph to
     /// the weights associated with the vertices in the petgraph graph.
-    pub fn new_from_petgraph(pg: &crate::PetGraph) -> (Self, IndexMap) {
-        let mut g = Self::new(pg.node_count());
+    pub fn new_from_petgraph(pg: &crate::PetGraph, arena: &'a Arena<T>) -> (Self, IndexMap) {
+        let mut g = Self::new(pg.node_count(), arena);
         let mut imap = IndexMap::new(pg.node_count());
 
         for v in pg.node_indices() {
@@ -200,7 +211,13 @@ impl<T: GraphWeight> Graph<T> {
     /// An associated index map is also split into equivalent maps for each individual component.
     /// In addition, this also provides a mapping from vertices in this graph to the index of the
     /// component they are a part of.
-    pub fn split_into_components(&self, imap: &IndexMap) -> (Vec<(Self, IndexMap)>, Vec<usize>) {
+    // TODO: Maybe we can make this consume self and split up the existing buffer instead of having
+    // to get new ones from the arena?
+    pub fn split_into_components(
+        &self,
+        imap: &IndexMap,
+        arena: &'a Arena<T>,
+    ) -> (Vec<(Self, IndexMap)>, Vec<usize>) {
         let mut visited = vec![false; self.size];
         let mut stack = Vec::new();
         let mut components = Vec::new();
@@ -231,7 +248,7 @@ impl<T: GraphWeight> Graph<T> {
                 }
             }
 
-            let mut comp = Self::new(current.len());
+            let mut comp = Self::new(current.len(), arena);
             let mut comp_imap = IndexMap::new(current.len());
             for i in 0..current.len() {
                 let v = current[i];
@@ -253,7 +270,7 @@ impl<T: GraphWeight> Graph<T> {
     }
 }
 
-impl<T: GraphWeight> std::ops::Index<(usize, usize)> for Graph<T> {
+impl<'a, T: GraphWeight> std::ops::Index<(usize, usize)> for Graph<'a, T> {
     type Output = T;
     /// Semantics equivalent to `Graph::get_ref`.
     fn index(&self, (u, v): (usize, usize)) -> &Self::Output {
@@ -333,12 +350,12 @@ impl std::ops::IndexMut<usize> for IndexMap {
 mod tests {
     use super::*;
 
-    fn example_graph() -> Graph<i32> {
+    fn example_graph(arena: &Arena<i32>) -> Graph<i32> {
         // 0 -- 1
         // |    |
         // 2    3
 
-        let mut g = Graph::new(4);
+        let mut g = Graph::new(4, arena);
         g.set(0, 1, 1);
         g.set(0, 2, 1);
         g.set(1, 3, 1);
@@ -347,7 +364,8 @@ mod tests {
 
     #[test]
     fn neighbors() {
-        let g = example_graph();
+        let a = Arena::new();
+        let g = example_graph(&a);
 
         assert_eq!(g.neighbors(0).collect::<Vec<_>>(), vec![1, 2]);
         assert_eq!(g.neighbors(1).collect::<Vec<_>>(), vec![0, 3]);
@@ -357,7 +375,8 @@ mod tests {
 
     #[test]
     fn closed_neighbors() {
-        let g = example_graph();
+        let a = Arena::new();
+        let g = example_graph(&a);
 
         assert_eq!(g.closed_neighbors(0).collect::<Vec<_>>(), vec![0, 1, 2]);
         assert_eq!(g.closed_neighbors(1).collect::<Vec<_>>(), vec![0, 1, 3]);

@@ -2,18 +2,19 @@ use crate::{
     graph::{GraphWeight, IndexMap},
     Graph, Weight,
 };
+use typed_arena::Arena;
 
 #[derive(Debug, Clone, Default)]
 pub struct CritClique {
     pub vertices: Vec<usize>,
 }
 
-pub struct CritCliqueGraph {
+pub struct CritCliqueGraph<'a> {
     pub cliques: Vec<CritClique>,
-    pub graph: Graph<Weight>,
+    pub graph: Graph<'a, Weight>,
 }
 
-impl CritCliqueGraph {
+impl<'a> CritCliqueGraph<'a> {
     pub fn into_petgraph(&self) -> petgraph::Graph<String, u8, petgraph::Undirected, u32> {
         use petgraph::prelude::NodeIndex;
 
@@ -42,7 +43,10 @@ impl CritCliqueGraph {
     }
 }
 
-pub fn build_crit_clique_graph(g: &Graph<Weight>) -> CritCliqueGraph {
+pub fn build_crit_clique_graph<'a>(
+    g: &Graph<'a, Weight>,
+    arena: &'a Arena<Weight>,
+) -> CritCliqueGraph<'a> {
     let mut cliques = Vec::new();
 
     // TODO: This looks at least O(n^2) but should apparently be do-able in O(n + m), so have
@@ -76,7 +80,7 @@ pub fn build_crit_clique_graph(g: &Graph<Weight>) -> CritCliqueGraph {
         cliques.push(clique);
     }
 
-    let mut crit_graph = Graph::new(cliques.len());
+    let mut crit_graph = Graph::new(cliques.len(), arena);
 
     for c1 in 0..cliques.len() {
         for c2 in 0..cliques.len() {
@@ -112,12 +116,13 @@ fn should_be_neighbors(g: &Graph<Weight>, c1: &CritClique, c2: &CritClique) -> b
 /// graph and merging all critical cliques into a single vertex.
 /// This assumes that the input graph is unweighted (i.e. all weights are +1 or -1 exactly). The
 /// reduced graph will be weighted however.
-pub fn merge_cliques(
-    g: &Graph<Weight>,
+pub fn merge_cliques<'a>(
+    g: &Graph<'a, Weight>,
     imap: &IndexMap,
+    arena: &'a Arena<Weight>,
     _final_path_debugs: &mut String,
-) -> (Graph<Weight>, IndexMap) {
-    let mut crit = build_crit_clique_graph(g);
+) -> (Graph<'a, Weight>, IndexMap) {
+    let mut crit = build_crit_clique_graph(g, arena);
 
     let mut crit_imap = IndexMap::empty(crit.graph.size());
 
@@ -592,7 +597,9 @@ mod tests {
         // This is the example from "Guo: A more effective linear kernelization for cluster
         // editing, 2009", Fig. 1
 
-        let mut graph = Graph::new(9);
+        let arena = Arena::new();
+
+        let mut graph = Graph::new(9, &arena);
         graph.set(0, 1, Weight::ONE);
         graph.set(0, 2, Weight::ONE);
         graph.set(1, 2, Weight::ONE);
@@ -607,7 +614,7 @@ mod tests {
         graph.set(5, 7, Weight::ONE);
         graph.set(5, 8, Weight::ONE);
 
-        let crit = build_crit_clique_graph(&graph);
+        let crit = build_crit_clique_graph(&graph, &arena);
 
         assert_eq!(crit.cliques[0].vertices, vec![0, 1]);
         assert_eq!(crit.cliques[1].vertices, vec![2]);

@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 use log::info;
 use structopt::StructOpt;
+use typed_arena::Arena;
 
 #[derive(Debug, StructOpt)]
 #[structopt(
@@ -36,9 +37,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             .to_str()
             .expect("input paths are valid UTF-8");
 
+        let arena = Arena::new();
+
         let graph: PetGraph = parser::parse_file(&input)?;
-        let (graph, imap) = Graph::new_from_petgraph(&graph);
-        let (components, _) = graph.split_into_components(&imap);
+        let (graph, imap) = Graph::new_from_petgraph(&graph, &arena);
+        let (components, _) = graph.split_into_components(&imap, &arena);
 
         let before = graph.size();
         let mut after = 0;
@@ -48,6 +51,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         for c in components.into_iter() {
             let (cg, imap) = c;
             let mut instance = cluster_editing::algo::ProblemInstance {
+                arena: &arena,
                 g: cg,
                 imap,
                 k: f32::MAX,

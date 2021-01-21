@@ -7,6 +7,7 @@ use crate::{
 
 use log::info;
 use petgraph::graph::NodeIndex;
+use typed_arena::Arena;
 
 #[derive(Copy, Clone, Debug)]
 pub enum Edit {
@@ -33,9 +34,10 @@ impl Edit {
 }
 
 pub fn execute_algorithm(graph: &PetGraph) -> PetGraph {
+    let root_arena = Arena::new();
     let mut result = graph.clone();
-    let (g, imap) = Graph::<Weight>::new_from_petgraph(&graph);
-    let (components, _) = g.split_into_components(&imap);
+    let (g, imap) = Graph::<Weight>::new_from_petgraph(&graph, &root_arena);
+    let (components, _) = g.split_into_components(&imap, &root_arena);
 
     info!(
         "Decomposed input graph into {} components",
@@ -45,7 +47,7 @@ pub fn execute_algorithm(graph: &PetGraph) -> PetGraph {
     for (i, c) in components.into_iter().enumerate() {
         let (cg, imap) = c;
         info!("Solving component {}...", i);
-        let (k, edits) = find_optimal_cluster_editing(&cg, &imap);
+        let (k, edits) = find_optimal_cluster_editing(&cg, &imap, &root_arena);
 
         info!(
             "Found a cluster editing with k={} and {} edits for component {}: {:?}",
@@ -114,7 +116,11 @@ pub fn execute_algorithm(graph: &PetGraph) -> PetGraph {
 // The algorithm works on reduced/modified graphs in parts, but when editing those we want
 // to create `Edit` values that are usable on the original graph; we can create those by
 // using the imap.
-pub fn find_optimal_cluster_editing(g: &Graph<Weight>, imap: &IndexMap) -> (i32, Vec<Edit>) {
+pub fn find_optimal_cluster_editing<'r>(
+    g: &Graph<'r, Weight>,
+    imap: &IndexMap,
+    arena: &'r Arena<Weight>,
+) -> (i32, Vec<Edit>) {
     // TODO: Not sure if executing the algo once with k = 0 is the best
     // way of handling already-disjoint-clique-components.
 
@@ -126,7 +132,8 @@ pub fn find_optimal_cluster_editing(g: &Graph<Weight>, imap: &IndexMap) -> (i32,
 
     let mut _path_debugs = String::new();
     let mut instance = ProblemInstance {
-        g: g.clone(),
+        arena,
+        g: g.clone_in(arena),
         imap: imap.clone(),
         k: 0.0,
         k_max: 0.0,
@@ -145,8 +152,12 @@ pub fn find_optimal_cluster_editing(g: &Graph<Weight>, imap: &IndexMap) -> (i32,
     loop {
         info!("[driver] Starting search with k={}...", k);
 
-        let mut instance = instance.fork_new_branch();
+        // TODO: More generous initial capacity?
+        let loop_arena = Arena::with_capacity(k as usize * g.size() * g.size());
+
+        let mut instance = instance.clone_in(&loop_arena);
         instance.k = k;
+
         if let Some(instance) = instance.find_cluster_editing() {
             if !instance.path_log.is_empty() {
                 log::info!("Final path debug log:\n{}", instance.path_log);
@@ -159,9 +170,9 @@ pub fn find_optimal_cluster_editing(g: &Graph<Weight>, imap: &IndexMap) -> (i32,
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct ProblemInstance {
-    pub g: Graph<Weight>,
+pub struct ProblemInstance<'a> {
+    pub arena: &'a Arena<Weight>,
+    pub g: Graph<'a, Weight>,
     pub imap: IndexMap,
     pub k: f32,
     pub k_max: f32,
@@ -169,9 +180,21 @@ pub struct ProblemInstance {
     pub path_log: String,
 }
 
-impl ProblemInstance {
+impl<'a> ProblemInstance<'a> {
     fn fork_new_branch(&self) -> Self {
-        self.clone()
+        self.clone_in(self.arena)
+    }
+
+    fn clone_in<'b>(&self, arena: &'b Arena<Weight>) -> ProblemInstance<'b> {
+        ProblemInstance {
+            arena,
+            g: self.g.clone_in(arena),
+            imap: self.imap.clone(),
+            k: self.k,
+            k_max: self.k_max,
+            edits: self.edits.clone(),
+            path_log: self.path_log.clone(),
+        }
     }
 
     /// Tries to find a solution of size <= k for this problem instance.
@@ -182,7 +205,7 @@ impl ProblemInstance {
         // to do further reductions or splitting as we can't afford any edits anyway.
 
         if self.k > 0.0 {
-            let (components, component_map) = self.g.split_into_components(&self.imap);
+            let (components, component_map) = self.g.split_into_components(&self.imap, self.arena);
             if components.len() > 1 {
                 // If a connected component decomposes into two components, we calculate
                 // the optimum solution for these components separately.
@@ -203,6 +226,7 @@ impl ProblemInstance {
                     ));
 
                     let comp_instance = ProblemInstance {
+                        arena: self.arena,
                         g: comp,
                         imap: comp_imap,
                         k: self.k,

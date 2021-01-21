@@ -4,10 +4,12 @@ use crate::{
 
 use std::collections::HashSet;
 
+use typed_arena::Arena;
+
 /// The reduction assumes an unweighted graph as input (i.e. one with only weights 1 and -1).
 pub fn initial_param_independent_reduction(p: &mut ProblemInstance) -> f32 {
     // Simply merging all critical cliques leads to a graph with at most 4 * k_opt vertices.
-    let (g, imap) = critical_cliques::merge_cliques(&p.g, &p.imap, &mut p.path_log);
+    let (g, imap) = critical_cliques::merge_cliques(&p.g, &p.imap, &p.arena, &mut p.path_log);
     p.g = g;
     p.imap = imap;
 
@@ -275,7 +277,7 @@ pub fn rule4(p: &mut ProblemInstance) -> bool {
         c.insert(w);
 
         if max.1 > second.1 * 2.0 {
-            let k_c = min_cut(&g, &c, first);
+            let k_c = min_cut(&g, &c, first, p.arena);
 
             // TODO: This probably double-counts every edge?
             let sum_neg_internal = c
@@ -561,8 +563,8 @@ pub fn rule5(p: &mut ProblemInstance) -> bool {
     applied
 }
 
-fn min_cut(g: &Graph<Weight>, c: &HashSet<usize>, a: usize) -> Weight {
-    let mut g = g.clone();
+fn min_cut(g: &Graph<Weight>, c: &HashSet<usize>, a: usize, arena: &Arena<Weight>) -> Weight {
+    let mut g = g.clone_in(arena);
     let mut c = c.clone();
 
     fn merge_mc(g: &mut Graph<Weight>, c: &mut HashSet<usize>, u: usize, v: usize) {
