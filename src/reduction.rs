@@ -13,7 +13,7 @@ pub fn initial_param_independent_reduction(p: &mut ProblemInstance) -> f32 {
 
     let k_start = (p.g.size() / 4) as f32;
 
-    general_param_independent_reduction(p);
+    full_param_independent_reduction(p);
 
     // TODO: It would seem that merging steps above could potentially result in zero-edges in the
     // graph. The algorithm is generally described as requiring that *no* zero-edges are in the
@@ -35,7 +35,7 @@ pub fn initial_param_independent_reduction(p: &mut ProblemInstance) -> f32 {
 /// Experiments", 2011
 /// Can be applied during the search as well, can modify `k` appropriately and don't require any
 /// specific form of the input.
-pub fn general_param_independent_reduction(p: &mut ProblemInstance) {
+pub fn full_param_independent_reduction(p: &mut ProblemInstance) {
     // TODO: Optimize at least rules 1-3 ! This is a super naive implementation, even the paper directly
     // describes a better strategy for doing it.
 
@@ -43,7 +43,7 @@ pub fn general_param_independent_reduction(p: &mut ProblemInstance) {
     dbg_trace_indent!(
         p,
         _k_start,
-        "Starting gen-param-indep-reduction, k {}, edits {:?}.",
+        "Starting full gen-param-indep-reduction, k {}, edits {:?}.",
         p.k,
         p.edits
     );
@@ -96,7 +96,57 @@ pub fn general_param_independent_reduction(p: &mut ProblemInstance) {
     dbg_trace_indent!(
         p,
         _k_start,
-        "Finished gen-param-indep-reduction, {}, edits {:?}.",
+        "Finished full gen-param-indep-reduction, {}, edits {:?}.",
+        p.k,
+        p.edits
+    );
+}
+
+pub fn fast_param_independent_reduction(p: &mut ProblemInstance) {
+    // TODO: Optimize at least rules 1-3 ! This is a super naive implementation, even the paper directly
+    // describes a better strategy for doing it.
+
+    let _k_start = p.k;
+    dbg_trace_indent!(
+        p,
+        _k_start,
+        "Starting fast gen-param-indep-reduction, k {}, edits {:?}.",
+        p.k,
+        p.edits
+    );
+
+    let mut applied_any_rule = true;
+    while applied_any_rule && p.k > 0.0 {
+        applied_any_rule = false;
+
+        let r3 = true;
+        let r2 = true;
+        let r1 = true;
+
+        // Rule 1 (heavy non-edge rule)
+        if r1 {
+            applied_any_rule |= rule1(p);
+        }
+
+        // Rule 2 (heavy edge rule, single end)
+        if r2 {
+            applied_any_rule |= rule2(p);
+        }
+
+        // Rule 3 (heavy edge rule, both ends)
+        if r3 {
+            applied_any_rule |= rule3(p);
+        }
+
+        if p.g.present_node_count() <= 1 {
+            break;
+        }
+    }
+
+    dbg_trace_indent!(
+        p,
+        _k_start,
+        "Finished fast gen-param-indep-reduction, {}, edits {:?}.",
         p.k,
         p.edits
     );

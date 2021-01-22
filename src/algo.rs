@@ -130,6 +130,7 @@ pub fn find_optimal_cluster_editing(g: &Graph<Weight>, imap: &IndexMap) -> (i32,
         imap: imap.clone(),
         k: 0.0,
         k_max: 0.0,
+        full_reduction_counter: 0,
         edits: Vec::new(),
         path_log: String::new(),
     };
@@ -165,6 +166,7 @@ pub struct ProblemInstance {
     pub imap: IndexMap,
     pub k: f32,
     pub k_max: f32,
+    pub full_reduction_counter: i32,
     pub edits: Vec<Edit>,
     pub path_log: String,
 }
@@ -207,6 +209,7 @@ impl ProblemInstance {
                         imap: comp_imap,
                         k: self.k,
                         k_max: self.k_max,
+                        full_reduction_counter: self.full_reduction_counter,
                         edits: self.edits,
                         path_log: self.path_log,
                     };
@@ -276,7 +279,15 @@ impl ProblemInstance {
 
         dbg_trace_indent!(self, self.k, "Performing reduction");
         let _k_start = self.k;
-        reduction::general_param_independent_reduction(&mut self);
+
+        if self.full_reduction_counter == 0 {
+            reduction::full_param_independent_reduction(&mut self);
+            self.full_reduction_counter = 6;
+        } else {
+            reduction::fast_param_independent_reduction(&mut self);
+            self.full_reduction_counter -= 1;
+        }
+
         dbg_trace_indent!(
             self,
             _k_start,
