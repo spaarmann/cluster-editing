@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use log::info;
 use rayon::{prelude::*, ThreadPoolBuilder};
@@ -49,19 +49,25 @@ fn main() -> Result<(), Box<dyn Error>> {
         .build_global()
         .unwrap();
 
-    let completed = opt
+    let (completed_count, total_time) = opt
         .input
         .par_iter()
         .map(|in_path| do_file(&opt.solver, in_path, &opt.output_dir, opt.timeout))
-        .filter(|&x| x)
-        .count();
+        .filter_map(|(success, time)| if success { Some(time) } else { None })
+        .fold(|| (0, 0.0), |(c, total), t| (c + 1, total + t))
+        .reduce(|| (0, 0.0), |(c1, t1), (c2, t2)| (c1 + c2, t1 + t2));
 
-    info!("Done. {} of {} completed.", completed, opt.input.len());
+    info!(
+        "Done. {} of {} completed in {} seconds.",
+        completed_count,
+        opt.input.len(),
+        total_time
+    );
 
     Ok(())
 }
 
-fn do_file(command: &PathBuf, in_path: &PathBuf, out_dir: &PathBuf, timeout: u64) -> bool {
+fn do_file(command: &PathBuf, in_path: &PathBuf, out_dir: &PathBuf, timeout: u64) -> (bool, f32) {
     let filename = in_path
         .file_name()
         .expect("every input is a file")
@@ -70,6 +76,7 @@ fn do_file(command: &PathBuf, in_path: &PathBuf, out_dir: &PathBuf, timeout: u64
 
     info!("Starting worker for {}...", filename);
 
+    let now = Instant::now();
     let mut child = Command::new(command)
         .arg(in_path)
         .stdout(Stdio::piped())
@@ -82,14 +89,18 @@ fn do_file(command: &PathBuf, in_path: &PathBuf, out_dir: &PathBuf, timeout: u64
         .unwrap()
     {
         Some(status) => {
-            info!("Completed {} with status {}", filename, status);
-            true
+            let elapsed = now.elapsed().as_secs_f32();
+            info!(
+                "Completed {} with status {} in {}",
+                filename, status, elapsed
+            );
+            (true, elapsed)
         }
         None => {
             info!("{} timed out!", filename);
             child.kill().unwrap();
             child.wait().unwrap();
-            false
+            (false, 0.0)
         }
     };
 
@@ -107,6 +118,10 @@ fn do_file(command: &PathBuf, in_path: &PathBuf, out_dir: &PathBuf, timeout: u64
         .write_all("\n== stderr ==\n".as_bytes())
         .unwrap();
     io::copy(&mut stderr, &mut output_file).unwrap();
+
+    output_file
+        .write_all(format!("\n== time ==\nElapsed time: {}", result.1).as_bytes())
+        .unwrap();
 
     output_file.flush().unwrap();
 
