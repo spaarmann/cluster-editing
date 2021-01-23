@@ -22,3 +22,8 @@ path = "src/tools/reduction.rs"
 [[bin]]
 name = "runner"
 path = "src/tools/runner.rs"
+
+[profile.release]
+opt-level = 3
+debug = 1
+lto = "fat"
