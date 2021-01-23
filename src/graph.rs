@@ -116,17 +116,7 @@ impl<T: GraphWeight> Graph<T> {
         debug_assert!(self.present[v]);
         assert_ne!(u, v);
 
-        self.matrix[u + self.size * v]
-    }
-
-    /// Get the weight associated with pair `(u, v)`.
-    /// u and v can be in any order, panics if `u == v`.
-    pub fn get_ref(&self, u: usize, v: usize) -> &T {
-        debug_assert!(self.present[u]);
-        debug_assert!(self.present[v]);
-        assert_ne!(u, v);
-
-        &self.matrix[u + self.size * v]
+        self.matrix[u * self.size + v]
     }
 
     /// Set the weight associated with pair `(u, v)`.
@@ -136,35 +126,48 @@ impl<T: GraphWeight> Graph<T> {
         debug_assert!(self.present[v]);
         assert_ne!(u, v);
 
-        self.matrix[u + self.size * v] = w;
-        self.matrix[v + self.size * u] = w;
+        self.matrix[u * self.size + v] = w;
+        self.matrix[v * self.size + u] = w;
     }
 
-    /// Returns an iterator over the open neighborhood of `u` (i.e., not including `u` itself). The
-    /// neighbors are guaranteed to be in ascending order.
-    // TODO: There might not be much point anymore in guaranteeing ascending order since the matrix
-    // is not triangular anymore.
+    /// Returns an iterator over the open neighborhood of `u` (i.e., not including `u` itself).
     pub fn neighbors(&self, u: usize) -> impl Iterator<Item = usize> + '_ {
         debug_assert!(self.present[u]);
-        (0..u)
-            .filter(move |&v| self.present[v] && self.get(v, u) > T::ZERO)
-            .chain(
-                ((u + 1)..self.size).filter(move |&v| self.present[v] && self.get(u, v) > T::ZERO),
-            )
+        self.nodes()
+            .filter(move |&v| u != v && self.get(u, v) > T::ZERO)
+        /*(0..u)
+        .filter(move |&v| self.present[v] && self.get(v, u) > T::ZERO)
+        .chain(
+            ((u + 1)..self.size).filter(move |&v| self.present[v] && self.get(u, v) > T::ZERO),
+        )*/
     }
 
-    /// Returns an iterator over the closed neighborhood of `u` (i.e., including `u` itself). The
-    /// neighbors are guaranteed to be in ascending order.
-    // TODO: There might not be much point anymore in guaranteeing ascending order since the matrix
-    // is not triangular anymore.
+    pub fn neighbors_with_weights(&self, u: usize) -> impl Iterator<Item = (usize, T)> + '_ {
+        debug_assert!(self.present[u]);
+        self.nodes().filter_map(move |v| {
+            if u == v {
+                return None;
+            }
+            let uv = self.get(u, v);
+            if uv > T::ZERO {
+                Some((v, uv))
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Returns an iterator over the closed neighborhood of `u` (i.e., including `u` itself).
     pub fn closed_neighbors(&self, u: usize) -> impl Iterator<Item = usize> + '_ {
         debug_assert!(self.present[u]);
-        (0..u)
-            .filter(move |&v| self.present[v] && self.get(v, u) > T::ZERO)
-            .chain(std::iter::once(u))
-            .chain(
-                ((u + 1)..self.size).filter(move |&v| self.present[v] && self.get(u, v) > T::ZERO),
-            )
+        self.nodes()
+            .filter(move |&v| u == v || self.get(u, v) > T::ZERO)
+        /*(0..u)
+        .filter(move |&v| self.present[v] && self.get(v, u) > T::ZERO)
+        .chain(std::iter::once(u))
+        .chain(
+            ((u + 1)..self.size).filter(move |&v| self.present[v] && self.get(u, v) > T::ZERO),
+        )*/
     }
 
     /// Returns the size of the graph.
@@ -250,14 +253,6 @@ impl<T: GraphWeight> Graph<T> {
         }
 
         (components, component_map)
-    }
-}
-
-impl<T: GraphWeight> std::ops::Index<(usize, usize)> for Graph<T> {
-    type Output = T;
-    /// Semantics equivalent to `Graph::get_ref`.
-    fn index(&self, (u, v): (usize, usize)) -> &Self::Output {
-        self.get_ref(u, v)
     }
 }
 

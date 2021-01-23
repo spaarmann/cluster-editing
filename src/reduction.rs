@@ -19,9 +19,11 @@ pub fn initial_param_independent_reduction(p: &mut ProblemInstance) -> f32 {
     // graph. The algorithm is generally described as requiring that *no* zero-edges are in the
     // input, so doesn't this pose a problem?
     // For now, this checks if we do ever produce any zero-edges and logs an error if so.
-    for u in 0..p.g.size() {
-        continue_if_not_present!(p.g, u);
-        for v in p.g.neighbors(u) {
+    for u in p.g.nodes() {
+        for v in p.g.nodes() {
+            if u == v {
+                continue;
+            }
             if p.g.get(u, v).is_zero() {
                 log::error!("Produced a zero-edge during parameter-independent reduction!");
             }
@@ -157,6 +159,9 @@ pub fn rule1(p: &mut ProblemInstance) -> bool {
     let mut applied = false;
     for u in 0..g.size() {
         continue_if_not_present!(g, u);
+
+        let sum = g.neighbors_with_weights(u).map(|(_, weight)| weight).sum();
+
         for v in 0..g.size() {
             if u == v {
                 continue;
@@ -168,7 +173,6 @@ pub fn rule1(p: &mut ProblemInstance) -> bool {
                 continue;
             }
 
-            let sum = g.neighbors(u).map(|w| g.get(u, w)).sum();
             if -uv >= sum {
                 p.path_log.push_str(&format!(
                     "rule1, forbidding {:?}-{:?}\n",
@@ -188,6 +192,18 @@ pub fn rule2(p: &mut ProblemInstance) -> bool {
     let mut applied = false;
     for u in 0..p.g.size() {
         continue_if_not_present!(p.g, u);
+
+        let total_sum =
+            p.g.nodes()
+                .filter_map(|w| {
+                    if u == w {
+                        None
+                    } else {
+                        Some(p.g.get(u, w).abs())
+                    }
+                })
+                .sum::<Weight>();
+
         for v in 0..p.g.size() {
             if u == v {
                 continue;
@@ -199,16 +215,7 @@ pub fn rule2(p: &mut ProblemInstance) -> bool {
                 continue;
             }
 
-            let sum =
-                p.g.nodes()
-                    .filter_map(|w| {
-                        if u == w || v == w {
-                            None
-                        } else {
-                            Some(p.g.get(u, w).abs())
-                        }
-                    })
-                    .sum();
+            let sum = total_sum - uv;
 
             if uv >= sum {
                 dbg_trace_indent!(p, p.k, "rule2 merge {:?}-{:?}", p.imap[u], p.imap[v]);
@@ -266,30 +273,24 @@ pub fn rule4(p: &mut ProblemInstance) -> bool {
     // NEG_INFINITY
     // TODO: Comment this stuff (including MinCut) and probably clean it up a bit ^^'
     let mut c = HashSet::new();
+
     // Choose initial u
-    let first = g
-        .nodes()
-        .fold(
-            (usize::MAX, InfiniteNum::NEG_INFINITY),
-            |(max_u, max), u| {
-                let val = g
-                    .nodes()
-                    .map(|v| {
-                        if u == v {
-                            Weight::ZERO
-                        } else {
-                            g.get(u, v).abs()
-                        }
-                    })
-                    .sum::<Weight>();
-                if val > max {
-                    (u, val)
-                } else {
-                    (max_u, max)
-                }
-            },
-        )
-        .0;
+    let (mut first, mut max) = (usize::MAX, Weight::NEG_INFINITY);
+    for u in g.nodes() {
+        let mut sum = Weight::ZERO;
+        for v in g.nodes() {
+            sum += if u == v {
+                Weight::ZERO
+            } else {
+                g.get(u, v).abs()
+            };
+        }
+        if sum > max {
+            first = u;
+            max = sum;
+        }
+    }
+
     c.insert(first);
 
     loop {
