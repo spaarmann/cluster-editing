@@ -41,6 +41,9 @@ struct Opt {
     /// create.
     #[structopt(long = "print-command", default_value = "sfdp")]
     print_command: String,
+
+    #[structopt(long = "full-reduction-interval", default_value = "6")]
+    full_reduction_interval: i32,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -65,7 +68,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         graphviz::print_graph(&opt.print_command, path, &crit_graph.into_petgraph());
     }
 
-    let result = algo::execute_algorithm(&graph);
+    let params = algo::Parameters {
+        full_reduction_interval: opt.full_reduction_interval,
+    };
+
+    let result = algo::execute_algorithm(&graph, params);
 
     info!(
         "Output graph has {} nodes and {} edges.",

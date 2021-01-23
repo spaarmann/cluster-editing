@@ -32,7 +32,12 @@ impl Edit {
     }
 }
 
-pub fn execute_algorithm(graph: &PetGraph) -> PetGraph {
+#[derive(Debug)]
+pub struct Parameters {
+    pub full_reduction_interval: i32,
+}
+
+pub fn execute_algorithm(graph: &PetGraph, params: Parameters) -> PetGraph {
     let mut result = graph.clone();
     let (g, imap) = Graph::<Weight>::new_from_petgraph(&graph);
     let (components, _) = g.split_into_components(&imap);
@@ -45,7 +50,7 @@ pub fn execute_algorithm(graph: &PetGraph) -> PetGraph {
     for (i, c) in components.into_iter().enumerate() {
         let (cg, imap) = c;
         info!("Solving component {}...", i);
-        let (k, edits) = find_optimal_cluster_editing(&cg, &imap);
+        let (k, edits) = find_optimal_cluster_editing(&cg, &imap, &params);
 
         info!(
             "Found a cluster editing with k={} and {} edits for component {}: {:?}",
@@ -114,7 +119,11 @@ pub fn execute_algorithm(graph: &PetGraph) -> PetGraph {
 // The algorithm works on reduced/modified graphs in parts, but when editing those we want
 // to create `Edit` values that are usable on the original graph; we can create those by
 // using the imap.
-pub fn find_optimal_cluster_editing(g: &Graph<Weight>, imap: &IndexMap) -> (i32, Vec<Edit>) {
+pub fn find_optimal_cluster_editing(
+    g: &Graph<Weight>,
+    imap: &IndexMap,
+    params: &Parameters,
+) -> (i32, Vec<Edit>) {
     // TODO: Not sure if executing the algo once with k = 0 is the best
     // way of handling already-disjoint-clique-components.
 
@@ -126,6 +135,7 @@ pub fn find_optimal_cluster_editing(g: &Graph<Weight>, imap: &IndexMap) -> (i32,
 
     let mut _path_debugs = String::new();
     let mut instance = ProblemInstance {
+        params,
         g: g.clone(),
         imap: imap.clone(),
         k: 0.0,
@@ -161,7 +171,8 @@ pub fn find_optimal_cluster_editing(g: &Graph<Weight>, imap: &IndexMap) -> (i32,
 }
 
 #[derive(Clone, Debug)]
-pub struct ProblemInstance {
+pub struct ProblemInstance<'a> {
+    pub params: &'a Parameters,
     pub g: Graph<Weight>,
     pub imap: IndexMap,
     pub k: f32,
@@ -171,7 +182,7 @@ pub struct ProblemInstance {
     pub path_log: String,
 }
 
-impl ProblemInstance {
+impl<'a> ProblemInstance<'a> {
     fn fork_new_branch(&self) -> Self {
         self.clone()
     }
@@ -205,6 +216,7 @@ impl ProblemInstance {
                     ));
 
                     let comp_instance = ProblemInstance {
+                        params: self.params,
                         g: comp,
                         imap: comp_imap,
                         k: self.k,
@@ -282,7 +294,7 @@ impl ProblemInstance {
 
         if self.full_reduction_counter == 0 {
             reduction::full_param_independent_reduction(&mut self);
-            self.full_reduction_counter = 6;
+            self.full_reduction_counter = self.params.full_reduction_interval;
         } else {
             reduction::fast_param_independent_reduction(&mut self);
             self.full_reduction_counter -= 1;

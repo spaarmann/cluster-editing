@@ -47,11 +47,16 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         for c in components.into_iter() {
             let (cg, imap) = c;
+            let params = cluster_editing::algo::Parameters {
+                full_reduction_interval: 6,
+            };
             let mut instance = cluster_editing::algo::ProblemInstance {
+                params: &params,
                 g: cg,
                 imap,
                 k: f32::MAX,
                 k_max: f32::MAX,
+                full_reduction_counter: 0,
                 edits: Vec::new(),
                 path_log: String::new(),
             };

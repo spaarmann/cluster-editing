@@ -24,6 +24,8 @@ struct Opt {
         long = "solver"
     )]
     solver: PathBuf,
+    #[structopt(long = "solver-args", default_value = "")]
+    solver_args: String,
     /// Timeout per graph, in minutes.
     #[structopt(default_value = "30", long = "timeout")]
     timeout: u64,
@@ -52,7 +54,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     let (completed_count, total_time) = opt
         .input
         .par_iter()
-        .map(|in_path| do_file(&opt.solver, in_path, &opt.output_dir, opt.timeout))
+        .map(|in_path| {
+            do_file(
+                &opt.solver,
+                &opt.solver_args,
+                in_path,
+                &opt.output_dir,
+                opt.timeout,
+            )
+        })
         .filter_map(|(success, time)| if success { Some(time) } else { None })
         .fold(|| (0, 0.0), |(c, total), t| (c + 1, total + t))
         .reduce(|| (0, 0.0), |(c1, t1), (c2, t2)| (c1 + c2, t1 + t2));
@@ -67,7 +77,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn do_file(command: &PathBuf, in_path: &PathBuf, out_dir: &PathBuf, timeout: u64) -> (bool, f32) {
+fn do_file(
+    command: &PathBuf,
+    args: &str,
+    in_path: &PathBuf,
+    out_dir: &PathBuf,
+    timeout: u64,
+) -> (bool, f32) {
     let filename = in_path
         .file_name()
         .expect("every input is a file")
@@ -77,7 +93,11 @@ fn do_file(command: &PathBuf, in_path: &PathBuf, out_dir: &PathBuf, timeout: u64
     info!("Starting worker for {}...", filename);
 
     let now = Instant::now();
-    let mut child = Command::new(command)
+    let mut command = Command::new(command);
+    if args.len() > 0 {
+        command.args(args.split(' '));
+    }
+    let mut child = command
         .arg(in_path)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
