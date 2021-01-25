@@ -41,6 +41,7 @@ pub struct Graph<T: GraphWeight> {
     /// Any users of this struct that iterate manually over some index range must check themself
     /// whether a vertex is removed, using `.is_present(u)`.
     present: Vec<bool>,
+    adjacency_lists: Vec<Vec<usize>>,
 }
 
 impl<T: GraphWeight> Graph<T> {
@@ -54,6 +55,7 @@ impl<T: GraphWeight> Graph<T> {
             size,
             matrix: vec![T::NEG_ONE; mat_size],
             present: vec![true; size],
+            adjacency_lists: vec![Vec::new(); size],
         }
     }
 
@@ -126,15 +128,42 @@ impl<T: GraphWeight> Graph<T> {
         debug_assert!(self.present[v]);
         assert_ne!(u, v);
 
+        let prev = self.matrix[u * self.size + v];
         self.matrix[u * self.size + v] = w;
         self.matrix[v * self.size + u] = w;
+
+        if prev <= T::ZERO && w > T::ZERO {
+            self.adjacency_lists[u].push(v);
+            self.adjacency_lists[v].push(u);
+        } else if prev > T::ZERO && w <= T::ZERO {
+            let idx_v_in_u = self.adjacency_lists[u]
+                .iter()
+                .position(|&x| x == v)
+                .unwrap();
+            self.adjacency_lists[u].swap_remove(idx_v_in_u);
+
+            let idx_u_in_v = self.adjacency_lists[v]
+                .iter()
+                .position(|&x| x == u)
+                .unwrap();
+            self.adjacency_lists[v].swap_remove(idx_u_in_v);
+        }
     }
 
     /// Returns an iterator over the open neighborhood of `u` (i.e., not including `u` itself).
     pub fn neighbors(&self, u: usize) -> impl Iterator<Item = usize> + '_ {
         debug_assert!(self.present[u]);
-        self.nodes()
-            .filter(move |&v| u != v && self.get(u, v) > T::ZERO)
+
+        self.adjacency_lists[u]
+            .iter()
+            .copied()
+            .filter(move |&v| self.present[v])
+
+        //self.adjacency_lists[u].iter().copied()
+
+        /*self.nodes()
+        .filter(move |&v| u != v && self.get(u, v) > T::ZERO)*/
+
         /*(0..u)
         .filter(move |&v| self.present[v] && self.get(v, u) > T::ZERO)
         .chain(
@@ -144,7 +173,11 @@ impl<T: GraphWeight> Graph<T> {
 
     pub fn neighbors_with_weights(&self, u: usize) -> impl Iterator<Item = (usize, T)> + '_ {
         debug_assert!(self.present[u]);
-        self.nodes().filter_map(move |v| {
+        self.adjacency_lists[u]
+            .iter()
+            .filter(move |&&v| self.present[v])
+            .map(move |&v| (v, self.get(u, v)))
+        /*self.nodes().filter_map(move |v| {
             if u == v {
                 return None;
             }
@@ -154,14 +187,15 @@ impl<T: GraphWeight> Graph<T> {
             } else {
                 None
             }
-        })
+        })*/
     }
 
     /// Returns an iterator over the closed neighborhood of `u` (i.e., including `u` itself).
     pub fn closed_neighbors(&self, u: usize) -> impl Iterator<Item = usize> + '_ {
         debug_assert!(self.present[u]);
-        self.nodes()
-            .filter(move |&v| u == v || self.get(u, v) > T::ZERO)
+        self.neighbors(u).chain(std::iter::once(u))
+        /*self.nodes()
+        .filter(move |&v| u == v || self.get(u, v) > T::ZERO)*/
         /*(0..u)
         .filter(move |&v| self.present[v] && self.get(v, u) > T::ZERO)
         .chain(std::iter::once(u))
