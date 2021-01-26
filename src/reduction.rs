@@ -214,7 +214,7 @@ pub fn rule2(p: &mut ProblemInstance) -> bool {
             })
             .sum::<Weight>();
 
-        g.iterate_nodes(0, |g, set_present, _, v| {
+        g.iterate_nodes(0, |g, set_not_present, _, v| {
             if u == v {
                 return;
             }
@@ -238,7 +238,7 @@ pub fn rule2(p: &mut ProblemInstance) -> bool {
                     imap,
                     u,
                     v,
-                    Some(set_present),
+                    Some(set_not_present),
                 );
                 applied = true;
             }
@@ -259,7 +259,7 @@ pub fn rule3(p: &mut ProblemInstance) -> bool {
     g.iterate_nodes(0, |g, _, i, u| {
         // This rule is already "symmetric" so we only go through pairs in one order, not
         // either order.
-        g.iterate_nodes(i + 1, |g, set_present, _, v| {
+        g.iterate_nodes(i + 1, |g, set_not_present, _, v| {
             let uv = g.get(u, v);
             if uv <= Weight::ZERO {
                 return;
@@ -285,7 +285,7 @@ pub fn rule3(p: &mut ProblemInstance) -> bool {
                     imap,
                     u,
                     v,
-                    Some(set_present),
+                    Some(set_not_present),
                 );
                 applied = true;
             }
@@ -564,78 +564,81 @@ pub fn rule5(p: &mut ProblemInstance) -> bool {
         max_value
     }
 
+    let g = &mut p.g;
+    let k = &mut p.k;
+    let k_max = p.k_max;
+    let edits = &mut p.edits;
+    let imap = &mut p.imap;
+    let path_log = &mut p.path_log;
+
     let mut applied = false;
 
-    for u in 0..p.g.size() {
-        continue_if_not_present!(p.g, u);
-
-        for v in (u + 1)..p.g.size() {
-            continue_if_not_present!(p.g, v);
-
-            let uv = p.g.get(u, v);
+    g.iterate_nodes(0, |g, _, i, u| {
+        g.iterate_nodes(i + 1, |g, set_not_present, _, v| {
+            let uv = g.get(u, v);
             if uv <= Weight::ZERO {
-                continue;
+                return;
             }
 
-            let d = compute_initial_data(&p.g, u, v);
+            let d = compute_initial_data(&g, u, v);
 
             if uv <= Weight::min(d.delta_u, d.delta_v) {
                 // No chance of satisfying condition
-                continue;
+                return;
             }
 
             if uv >= 0.5 * (d.relative_difference + d.delta_u + d.delta_v) {
                 // Can always merge, no need to compute the more expensive stuff
-                dbg_trace_indent!(
-                    p,
-                    p.k,
+                dbg_trace_indent_with_max!(
+                    k_max,
+                    k,
                     "merge before dynprog: {:?}-{:?}, uv {}, rel_diff {}, du {}, dv {}, edits so far: {:?}",
-                    p.imap[u],
-                    p.imap[v],
+                    imap[u],
+                    imap[v],
                     uv,
                     d.relative_difference,
                     d.delta_u,
                     d.delta_v,
-                    p.edits
+                    edits
                 );
-                p.path_log.push_str(&format!(
+                path_log.push_str(&format!(
                     "rule5, early merge {:?}-{:?}\n",
-                    p.imap[u], p.imap[v]
+                    imap[u], imap[v]
                 ));
-                p.merge(u, v);
+                ProblemInstance::merge_with_set_present_callback(g, k, k_max, edits, imap, u, v, Some(set_not_present));
                 applied = true;
-                continue;
+                return;
             }
 
             let _d = d.clone();
             let max = compute_max(d, uv);
 
             if uv > max {
-                dbg_trace_indent!(
-                    p,
-                    p.k,
+                dbg_trace_indent_with_max!(
+                    k_max,
+                    k,
                     "merge after dynprog: {:?}-{:?}, uv {}, rel_diff {}, du {}, dv {}, max {}, edits so far: {:?}",
-                    p.imap[u],
-                    p.imap[v],
+                    imap[u],
+                    imap[v],
                     uv,
                     _d.relative_difference,
                     _d.delta_u,
                     _d.delta_v,
                     max,
-                    p.edits
+                    edits
                 );
-                p.path_log
-                    .push_str(&format!("rule5, merge {:?}-{:?}\n", p.imap[u], p.imap[v]));
-                p.merge(u, v);
+                path_log
+                    .push_str(&format!("rule5, merge {:?}-{:?}\n", imap[u], imap[v]));
+                ProblemInstance::merge_with_set_present_callback(g, k, k_max, edits, imap, u, v, Some(set_not_present));
                 applied = true;
-                continue;
+                return;
             }
 
             // TODO: Paper claims it might be good to use the two bounds above to decide in which
             // order the below computation should be executed for the edges, but the PEACE impl
             // doesn't seem to do anything of the sort either, afaict.
-        }
-    }
+        });
+    });
 
     applied
 }
