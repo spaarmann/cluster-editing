@@ -156,113 +156,141 @@ pub fn fast_param_independent_reduction(p: &mut ProblemInstance) {
 
 pub fn rule1(p: &mut ProblemInstance) -> bool {
     let g = &mut p.g;
-    let mut applied = false;
-    for u in 0..g.size() {
-        continue_if_not_present!(g, u);
+    let k = &p.k;
+    let k_max = p.k_max;
+    let imap = &p.imap;
+    let path_log = &mut p.path_log;
 
+    let mut applied = false;
+    g.iterate_nodes(0, |g, _, _, u| {
         let sum = g.neighbors_with_weights(u).map(|(_, weight)| weight).sum();
 
-        for v in 0..g.size() {
+        g.iterate_nodes(0, |g, _, _, v| {
             if u == v {
-                continue;
+                return;
             }
-            continue_if_not_present!(g, v);
 
             let uv = g.get(u, v);
             if uv >= Weight::ONE || !uv.is_finite() {
-                continue;
+                return;
             }
 
             if -uv >= sum {
-                p.path_log.push_str(&format!(
-                    "rule1, forbidding {:?}-{:?}\n",
-                    p.imap[u], p.imap[v]
-                ));
-                dbg_trace_indent!(p, p.k, "rule1, forbidding {:?}-{:?}", p.imap[u], p.imap[v]);
+                path_log.push_str(&format!("rule1, forbidding {:?}-{:?}\n", imap[u], imap[v]));
+                dbg_trace_indent_with_max!(
+                    k_max,
+                    k,
+                    "rule1, forbidding {:?}-{:?}",
+                    imap[u],
+                    imap[v]
+                );
 
                 g.set(u, v, InfiniteNum::NEG_INFINITY);
                 applied = true;
             }
-        }
-    }
+        });
+    });
     applied
 }
 
 pub fn rule2(p: &mut ProblemInstance) -> bool {
+    let g = &mut p.g;
+    let k = &mut p.k;
+    let k_max = p.k_max;
+    let edits = &mut p.edits;
+    let imap = &mut p.imap;
+    let path_log = &mut p.path_log;
+
     let mut applied = false;
-    for u in 0..p.g.size() {
-        continue_if_not_present!(p.g, u);
+    g.iterate_nodes(0, |g, _, _, u| {
+        let total_sum = g
+            .nodes()
+            .filter_map(|w| {
+                if u == w {
+                    None
+                } else {
+                    Some(g.get(u, w).abs())
+                }
+            })
+            .sum::<Weight>();
 
-        let total_sum =
-            p.g.nodes()
-                .filter_map(|w| {
-                    if u == w {
-                        None
-                    } else {
-                        Some(p.g.get(u, w).abs())
-                    }
-                })
-                .sum::<Weight>();
-
-        for v in 0..p.g.size() {
+        g.iterate_nodes(0, |g, set_present, _, v| {
             if u == v {
-                continue;
+                return;
             }
-            continue_if_not_present!(p.g, v);
 
-            let uv = p.g.get(u, v);
+            let uv = g.get(u, v);
             if uv <= Weight::ZERO {
-                continue;
+                return;
             }
 
             let sum = total_sum - uv;
 
             if uv >= sum {
-                dbg_trace_indent!(p, p.k, "rule2 merge {:?}-{:?}", p.imap[u], p.imap[v]);
-                p.path_log
-                    .push_str(&format!("rule2, merge {:?}-{:?}\n", p.imap[u], p.imap[v]));
+                dbg_trace_indent_with_max!(k_max, k, "rule2 merge {:?}-{:?}", imap[u], imap[v]);
+                path_log.push_str(&format!("rule2, merge {:?}-{:?}\n", imap[u], imap[v]));
 
-                p.merge(u, v);
+                ProblemInstance::merge_with_set_present_callback(
+                    g,
+                    k,
+                    k_max,
+                    edits,
+                    imap,
+                    u,
+                    v,
+                    Some(set_present),
+                );
                 applied = true;
             }
-        }
-    }
+        });
+    });
     applied
 }
 
 pub fn rule3(p: &mut ProblemInstance) -> bool {
+    let g = &mut p.g;
+    let k = &mut p.k;
+    let k_max = p.k_max;
+    let edits = &mut p.edits;
+    let imap = &mut p.imap;
+    let path_log = &mut p.path_log;
+
     let mut applied = false;
-    for u in 0..p.g.size() {
-        continue_if_not_present!(p.g, u);
+    g.iterate_nodes(0, |g, _, i, u| {
         // This rule is already "symmetric" so we only go through pairs in one order, not
         // either order.
-        for v in (u + 1)..p.g.size() {
-            continue_if_not_present!(p.g, v);
-
-            let uv = p.g.get(u, v);
+        g.iterate_nodes(i + 1, |g, set_present, _, v| {
+            let uv = g.get(u, v);
             if uv <= Weight::ZERO {
-                continue;
+                return;
             }
 
-            let sum =
-                p.g.neighbors(u)
-                    .map(|w| if w == v { Weight::ZERO } else { p.g.get(u, w) })
-                    .sum::<Weight>()
-                    + p.g
-                        .neighbors(v)
-                        .map(|w| if w == u { Weight::ZERO } else { p.g.get(v, w) })
-                        .sum::<Weight>();
+            let sum = g
+                .neighbors(u)
+                .map(|w| if w == v { Weight::ZERO } else { g.get(u, w) })
+                .sum::<Weight>()
+                + g.neighbors(v)
+                    .map(|w| if w == u { Weight::ZERO } else { g.get(v, w) })
+                    .sum::<Weight>();
 
             if uv >= sum {
-                dbg_trace_indent!(p, p.k, "rule3 merge {:?}-{:?}", p.imap[u], p.imap[v]);
-                p.path_log
-                    .push_str(&format!("rule3, merge {:?}-{:?}\n", p.imap[u], p.imap[v]));
+                dbg_trace_indent_with_max!(k_max, k, "rule3 merge {:?}-{:?}", imap[u], imap[v]);
+                path_log.push_str(&format!("rule3, merge {:?}-{:?}\n", imap[u], imap[v]));
 
-                p.merge(u, v);
+                ProblemInstance::merge_with_set_present_callback(
+                    g,
+                    k,
+                    k_max,
+                    edits,
+                    imap,
+                    u,
+                    v,
+                    Some(set_present),
+                );
                 applied = true;
             }
-        }
-    }
+        });
+    });
     applied
 }
 

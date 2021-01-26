@@ -40,7 +40,8 @@ pub struct Graph<T: GraphWeight> {
     /// performance reasons.
     /// Any users of this struct that iterate manually over some index range must check themself
     /// whether a vertex is removed, using `.is_present(u)`.
-    present: Vec<bool>,
+    present_markers: Vec<bool>,
+    present_nodes: Vec<usize>,
     adjacency_lists: Vec<Vec<usize>>,
 }
 
@@ -54,7 +55,8 @@ impl<T: GraphWeight> Graph<T> {
         Graph {
             size,
             matrix: vec![T::NEG_ONE; mat_size],
-            present: vec![true; size],
+            present_markers: vec![true; size],
+            present_nodes: (0..size).collect::<Vec<_>>(),
             adjacency_lists: vec![Vec::new(); size],
         }
     }
@@ -90,15 +92,15 @@ impl<T: GraphWeight> Graph<T> {
 
         let mut map = vec![NodeIndex::new(0); self.size];
         for u in 0..self.size {
-            if self.present[u] {
+            if self.present_markers[u] {
                 map[u] = pg.add_node(imap.map(|m| m[u].clone()).unwrap_or(vec![u]));
             }
         }
 
         for u in 0..self.size {
-            if self.present[u] {
+            if self.present_markers[u] {
                 for v in (u + 1)..self.size {
-                    if self.present[v] {
+                    if self.present_markers[v] {
                         let uv = self.get(u, v);
                         if uv > T::ZERO {
                             pg.add_edge(map[u], map[v], uv);
@@ -114,8 +116,8 @@ impl<T: GraphWeight> Graph<T> {
     /// Get the weight associated with pair `(u, v)`.
     /// u and v can be in any order, panics if `u == v`.
     pub fn get(&self, u: usize, v: usize) -> T {
-        debug_assert!(self.present[u]);
-        debug_assert!(self.present[v]);
+        debug_assert!(self.present_markers[u]);
+        debug_assert!(self.present_markers[v]);
         assert_ne!(u, v);
 
         self.matrix[u * self.size + v]
@@ -124,8 +126,8 @@ impl<T: GraphWeight> Graph<T> {
     /// Set the weight associated with pair `(u, v)`.
     /// u and v can be in any order, panics if `u == v`.
     pub fn set(&mut self, u: usize, v: usize, w: T) {
-        debug_assert!(self.present[u]);
-        debug_assert!(self.present[v]);
+        debug_assert!(self.present_markers[u]);
+        debug_assert!(self.present_markers[v]);
         assert_ne!(u, v);
 
         let prev = self.matrix[u * self.size + v];
@@ -152,12 +154,12 @@ impl<T: GraphWeight> Graph<T> {
 
     /// Returns an iterator over the open neighborhood of `u` (i.e., not including `u` itself).
     pub fn neighbors(&self, u: usize) -> impl Iterator<Item = usize> + '_ {
-        debug_assert!(self.present[u]);
+        debug_assert!(self.present_markers[u]);
 
         self.adjacency_lists[u]
             .iter()
             .copied()
-            .filter(move |&v| self.present[v])
+            .filter(move |&v| self.present_markers[v])
 
         //self.adjacency_lists[u].iter().copied()
 
@@ -172,10 +174,10 @@ impl<T: GraphWeight> Graph<T> {
     }
 
     pub fn neighbors_with_weights(&self, u: usize) -> impl Iterator<Item = (usize, T)> + '_ {
-        debug_assert!(self.present[u]);
+        debug_assert!(self.present_markers[u]);
         self.adjacency_lists[u]
             .iter()
-            .filter(move |&&v| self.present[v])
+            .filter(move |&&v| self.present_markers[v])
             .map(move |&v| (v, self.get(u, v)))
         /*self.nodes().filter_map(move |v| {
             if u == v {
@@ -192,7 +194,7 @@ impl<T: GraphWeight> Graph<T> {
 
     /// Returns an iterator over the closed neighborhood of `u` (i.e., including `u` itself).
     pub fn closed_neighbors(&self, u: usize) -> impl Iterator<Item = usize> + '_ {
-        debug_assert!(self.present[u]);
+        debug_assert!(self.present_markers[u]);
         self.neighbors(u).chain(std::iter::once(u))
         /*self.nodes()
         .filter(move |&v| u == v || self.get(u, v) > T::ZERO)*/
@@ -211,33 +213,95 @@ impl<T: GraphWeight> Graph<T> {
     }
 
     pub fn present_node_count(&self) -> usize {
-        (0..self.size).filter(move |&v| self.present[v]).count()
+        self.present_nodes.len()
+        /*(0..self.size)
+        .filter(move |&v| self.present_markers[v])
+        .count()*/
     }
 
     /// Returns an iterator over all the nodes present in the graph.
     pub fn nodes(&self) -> impl Iterator<Item = usize> + '_ {
-        (0..self.size).filter(move |&v| self.present[v])
+        self.present_nodes.iter().copied()
+        //(0..self.size).filter(move |&v| self.present_markers[v])
+    }
+
+    pub fn nodes_from(&self, i: usize) -> impl Iterator<Item = usize> + '_ {
+        self.present_nodes[i..].iter().copied()
+    }
+
+    // TODO: This function has some interesting invariants, make sure to document its usage
+    // properly.
+    pub fn iterate_nodes<F>(&mut self, start: usize, mut f: F)
+    where
+        F: FnMut(&mut Self, &mut dyn FnMut(&mut Self, usize), usize, usize),
+    {
+        let mut i = start;
+        while i < self.present_nodes.len() {
+            let mut set_not_present = move |this: &mut Self, x: usize| {
+                let x_idx = this.present_nodes.iter().position(|&u| u == x).unwrap();
+
+                // We only allow setting elements to not present that have already been iterated
+                // over (or are the current iteration element). If a past element was removed,
+                // swap_remove would move a not-yet-visited element back into that slot and that
+                // just results in all kinds of headaches.
+                if x_idx < i {
+                    panic!("Tried to set an earlier element ({} with idx {}) to not present, currently at idx {}!", x, x_idx, i);
+                }
+
+                this.present_markers[x] = false;
+                this.present_nodes.swap_remove(x_idx);
+
+                // If this is the current element, make sure to iterate the replacement too.
+                // Otherwise, x_idx > i, in which case everything is fine anyway.
+                if x_idx == i {
+                    i -= 1;
+                }
+            };
+
+            f(self, &mut set_not_present, i, self.present_nodes[i]);
+
+            i += 1;
+        }
     }
 
     pub fn has_edge(&self, u: usize, v: usize) -> bool {
-        debug_assert!(self.present[u]);
-        debug_assert!(self.present[v]);
+        debug_assert!(self.present_markers[u]);
+        debug_assert!(self.present_markers[v]);
         self.get(u, v) > T::ZERO
     }
 
     pub fn is_present(&self, u: usize) -> bool {
-        self.present[u]
+        self.present_markers[u]
     }
 
-    pub fn set_present(&mut self, u: usize, present: bool) {
-        self.present[u] = present;
+    pub fn set_present(&mut self, u: usize, present: bool) -> usize {
+        let prev = self.present_markers[u];
+        self.present_markers[u] = present;
+
+        // TODO: If we keep all the weird iteration stuff, this should just become
+        // a `set_not_present` function that does not allow the two unimplemented! cases.
+
+        if prev && !present {
+            let idx = self.present_nodes.iter().position(|&x| x == u).unwrap();
+            self.present_nodes.swap_remove(idx);
+            idx
+        } else if !prev && present {
+            unimplemented!();
+        } else {
+            unimplemented!();
+        }
     }
 
     /// Splits a graph into its connected components.
     /// An associated index map is also split into equivalent maps for each individual component.
     /// In addition, this also provides a mapping from vertices in this graph to the index of the
     /// component they are a part of.
-    pub fn split_into_components(&self, imap: &IndexMap) -> (Vec<(Self, IndexMap)>, Vec<usize>) {
+    /// If the graph consists of only a single component, this returns None instead to avoid extra
+    /// allocations and work.
+    pub fn split_into_components(
+        &self,
+        imap: &IndexMap,
+    ) -> Option<(Vec<(Self, IndexMap)>, Vec<usize>)> {
         let mut visited = vec![false; self.size];
         let mut stack = Vec::new();
         let mut components = Vec::new();
@@ -246,8 +310,10 @@ impl<T: GraphWeight> Graph<T> {
 
         let mut component_map = vec![0; self.size];
 
+        let present_count = self.present_node_count();
+
         for u in 0..self.size {
-            if visited[u] || !self.present[u] {
+            if visited[u] || !self.present_markers[u] {
                 continue;
             }
 
@@ -268,6 +334,11 @@ impl<T: GraphWeight> Graph<T> {
                 }
             }
 
+            if current.len() == present_count {
+                // Complete graph is this single component.
+                return None;
+            }
+
             let mut comp = Self::new(current.len());
             let mut comp_imap = IndexMap::new(current.len());
             for i in 0..current.len() {
@@ -286,7 +357,7 @@ impl<T: GraphWeight> Graph<T> {
             current.clear();
         }
 
-        (components, component_map)
+        Some((components, component_map))
     }
 }
 

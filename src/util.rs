@@ -29,6 +29,24 @@ macro_rules! dbg_trace_indent {
     )
 }
 
+macro_rules! dbg_trace_indent_with_max {
+    ($k_max:expr, $k:expr, $s:expr) => (
+        #[cfg(not(release))]
+        {
+            log::log!(log::Level::Trace, concat!("{}[k={}]", $s),
+                "\t".repeat(($k_max - $k.max(0.0)) as usize), $k);
+        }
+    );
+    ($k_max:expr, $k:expr, $s:expr, $($arg:tt)+) => (
+        #[cfg(not(release))]
+        {
+            log::log!(log::Level::Trace, concat!("{}[k={}]", $s),
+                "\t".repeat(($k_max - $k.max(0.0)) as usize),
+                $k, $($arg)+);
+        }
+    )
+}
+
 /// `continue_if_not_present(g, u)` executes a `continue` statement if vertex `u` is not present in
 /// Graph `g`.
 macro_rules! continue_if_not_present {

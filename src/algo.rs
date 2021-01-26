@@ -40,7 +40,10 @@ pub struct Parameters {
 pub fn execute_algorithm(graph: &PetGraph, params: Parameters) -> PetGraph {
     let mut result = graph.clone();
     let (g, imap) = Graph::<Weight>::new_from_petgraph(&graph);
-    let (components, _) = g.split_into_components(&imap);
+    let components = g
+        .split_into_components(&imap)
+        .map(|(v, _)| v)
+        .unwrap_or_else(|| vec![(g, imap)]);
 
     info!(
         "Decomposed input graph into {} components",
@@ -193,13 +196,11 @@ impl<'a> ProblemInstance<'a> {
     fn find_cluster_editing(mut self) -> Option<Self> {
         // If k is already 0, we can only if we currently have a solution; there is no point in trying
         // to do further reductions or splitting as we can't afford any edits anyway.
-
         if self.k > 0.0 {
-            let (components, component_map) = self.g.split_into_components(&self.imap);
-            if components.len() > 1 {
-                // If a connected component decomposes into two components, we calculate
+            if let Some((components, component_map)) = self.g.split_into_components(&self.imap) {
+                //if components.len() > 1 {
+                // If a connected component decomposes into two or more components, we calculate
                 // the optimum solution for these components separately.
-                // TODO: Still not entirely convinced why this is actually *correct*.
 
                 let _k_start = self.k;
                 for (_i, (comp, comp_imap)) in components.into_iter().enumerate() {
@@ -260,7 +261,16 @@ impl<'a> ProblemInstance<'a> {
 
                 // We still need to "cash in" any zero-edges that connect the different components.
                 let mut zero_count = 0.0;
-                for u in 0..self.g.size() {
+                for (i, u) in self.g.nodes().enumerate() {
+                    for v in self.g.nodes_from(i + 1) {
+                        if component_map[u] != component_map[v] {
+                            if self.g.get(u, v).is_zero() {
+                                zero_count += 1.0;
+                            }
+                        }
+                    }
+                }
+                /*for u in 0..self.g.size() {
                     continue_if_not_present!(self.g, u);
                     for v in (u + 1)..self.g.size() {
                         continue_if_not_present!(self.g, v);
@@ -270,7 +280,7 @@ impl<'a> ProblemInstance<'a> {
                             }
                         }
                     }
-                }
+                }*/
 
                 self.k -= zero_count / 2.0;
 
@@ -286,6 +296,7 @@ impl<'a> ProblemInstance<'a> {
                 } else {
                     return None;
                 }
+                //}
             }
         }
 
@@ -349,7 +360,15 @@ impl<'a> ProblemInstance<'a> {
                 // If there are still zero-edges, we need to "cash in" the 0.5 edit cost we deferred
                 // when merging.
                 let mut zero_count = 0.0;
-                for u in 0..self.g.size() {
+                for (i, u) in self.g.nodes().enumerate() {
+                    for v in self.g.nodes_from(i + 1) {
+                        if self.g.get(u, v).is_zero() {
+                            zero_count += 1.0;
+                        }
+                    }
+                }
+
+                /*for u in 0..self.g.size() {
                     continue_if_not_present!(self.g, u);
                     for v in (u + 1)..self.g.size() {
                         continue_if_not_present!(self.g, v);
@@ -357,7 +376,7 @@ impl<'a> ProblemInstance<'a> {
                             zero_count += 1.0;
                         }
                     }
-                }
+                }*/
 
                 self.k -= zero_count / 2.0;
 
@@ -501,96 +520,131 @@ impl<'a> ProblemInstance<'a> {
     /// Merge u and v. The merged vertex becomes the new vertex at index u in the graph, while v is
     /// marked as not present anymore.
     pub fn merge(&mut self, u: usize, v: usize) {
-        assert!(self.g.is_present(u));
-        assert!(self.g.is_present(v));
+        Self::merge_with_set_present_callback(
+            &mut self.g,
+            &mut self.k,
+            self.k_max,
+            &mut self.edits,
+            &mut self.imap,
+            u,
+            v,
+            None,
+        );
+    }
 
-        let _start_k = self.k;
-        let _start_edit_len = self.edits.len();
+    pub fn merge_with_set_present_callback(
+        g: &mut Graph<Weight>,
+        k: &mut f32,
+        k_max: f32,
+        edits: &mut Vec<Edit>,
+        imap: &mut IndexMap,
+        u: usize,
+        v: usize,
+        set_not_present: Option<&mut dyn FnMut(&mut Graph<Weight>, usize)>,
+    ) {
+        assert!(g.is_present(u));
+        assert!(g.is_present(v));
 
-        for w in 0..self.g.size() {
-            if w == u || w == v || !self.g.is_present(w) {
-                continue;
+        let _start_k = *k;
+        let _start_edit_len = edits.len();
+
+        g.iterate_nodes(0, |g, _, _, w| {
+            if w == u || w == v {
+                return;
             }
 
-            let uw = self.g.get(u, w);
-            let vw = self.g.get(v, w);
+            let uw = g.get(u, w);
+            let vw = g.get(v, w);
 
             if uw > Weight::ZERO {
                 if vw < Weight::ZERO {
                     // (+, -)
-                    let new_weight = self.merge_nonmatching_nonzero(u, v, w);
-                    self.g.set(u, w, new_weight);
+                    let new_weight = Self::merge_nonmatching_nonzero(g, k, edits, imap, u, v, w);
+                    g.set(u, w, new_weight);
                 } else if vw > Weight::ZERO {
                     // (+, +)
-                    self.g.set(u, w, uw + vw);
+                    g.set(u, w, uw + vw);
                 } else {
                     // (+, 0)
-                    self.k -= 0.5;
-                    Edit::insert(&mut self.edits, &self.imap, v, w);
+                    *k -= 0.5;
+                    Edit::insert(edits, imap, v, w);
                 }
             } else if uw < Weight::ZERO {
                 if vw < Weight::ZERO {
                     // (-, -)
-                    self.g.set(u, w, uw + vw);
+                    g.set(u, w, uw + vw);
                 } else if vw > Weight::ZERO {
                     // (-, +)
-                    let new_weight = self.merge_nonmatching_nonzero(v, u, w);
-                    self.g.set(u, w, new_weight);
+                    let new_weight = Self::merge_nonmatching_nonzero(g, k, edits, imap, v, u, w);
+
+                    g.set(u, w, new_weight);
                 } else {
                     // (-, 0)
-                    self.k -= 0.5;
+                    *k -= 0.5;
                 }
             } else {
                 if vw < Weight::ZERO {
                     // (0, -)
-                    self.k -= 0.5;
-                    self.g.set(u, w, vw);
+                    *k -= 0.5;
+                    g.set(u, w, vw);
                 } else if vw > Weight::ZERO {
                     // (0, +)
-                    self.k -= 0.5;
-                    self.g.set(u, w, vw);
-                    Edit::insert(&mut self.edits, &self.imap, u, w);
+                    *k -= 0.5;
+                    g.set(u, w, vw);
+                    Edit::insert(edits, imap, u, w);
                 } else {
                     // (0, 0)
-                    self.k -= 0.5;
+                    *k -= 0.5;
                 }
             }
-        }
+        });
 
-        dbg_trace_indent!(
-            self,
+        dbg_trace_indent_with_max!(
+            k_max,
             _start_k,
             "Merged {:?} and {:?}. k was {}, is now {}. New edits: {:?}",
-            self.imap[u],
-            self.imap[v],
+            imap[u],
+            imap[v],
             _start_k,
-            self.k,
-            &self.edits[_start_edit_len..]
+            k,
+            &edits[_start_edit_len..]
         );
 
-        self.g.set_present(v, false);
-        let mut imap_v = self.imap.take(v);
-        self.imap[u].append(&mut imap_v);
+        if let Some(callback) = set_not_present {
+            callback(g, v);
+        } else {
+            g.set_present(v, false);
+        }
+        let mut imap_v = imap.take(v);
+        imap[u].append(&mut imap_v);
     }
 
     // `merge` helper. Merge uw and vw, under the assumption that weight(uw) > 0 and weight(vw) < 0.
     // Adds appropriate edits to `edits` and modifies `k` and returns the correct new weight for the
     // merged edge.
-    fn merge_nonmatching_nonzero(&mut self, u: usize, v: usize, w: usize) -> Weight {
-        let uw = self.g.get(u, w);
-        let vw = self.g.get(v, w);
+    fn merge_nonmatching_nonzero(
+        g: &Graph<Weight>,
+        k: &mut f32,
+        edits: &mut Vec<Edit>,
+        imap: &IndexMap,
+        u: usize,
+        v: usize,
+        w: usize,
+    ) -> Weight {
+        let uw = g.get(u, w);
+        let vw = g.get(v, w);
 
         if (uw + vw).is_zero() {
-            self.k -= uw as f32 - 0.5;
-            Edit::delete(&mut self.edits, &self.imap, u, w);
+            *k -= uw as f32 - 0.5;
+            Edit::delete(edits, imap, u, w);
             return Weight::ZERO;
         } else {
             if uw > -vw {
-                self.k -= -vw as f32;
-                Edit::insert(&mut self.edits, &self.imap, v, w);
+                *k -= -vw as f32;
+                Edit::insert(edits, imap, v, w);
             } else {
-                self.k -= uw as f32;
-                Edit::delete(&mut self.edits, &self.imap, u, w);
+                *k -= uw as f32;
+                Edit::delete(edits, imap, u, w);
             }
             return uw + vw;
         }
