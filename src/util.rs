@@ -1,12 +1,12 @@
 #[allow(unused)]
 macro_rules! log_indent {
-    ($k:expr, $l:expr, $s:expr) => (
-        log::log!(log::Level::$l, concat!("{}[k={}]", $s),
-            "\t".repeat((unsafe { K_MAX - $k.max(0.0) }) as usize), $k);
-    );
-    ($k:expr, $l:expr, $s:expr, $($arg:tt)+) => (
+    ($t:expr, $k:expr, $l:expr, $s:expr) => (
         log::log!($l, concat!("{}[k={}]", $s),
-            "\t".repeat((unsafe { K_MAX - $k.max(0.0) }) as usize),
+            "\t".repeat(($t.k_max -  $k.max(0.0)) as usize), $k);
+    );
+    ($t:expr, $k:expr, $l:expr, $s:expr, $($arg:tt)+) => (
+        log::log!($l, concat!("{}[k={}]", $s),
+            "\t".repeat(($t.k_max - $k.max(0.0)) as usize),
             $k, $($arg)+);
     )
 }

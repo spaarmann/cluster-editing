@@ -38,10 +38,14 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         let graph: PetGraph = parser::parse_file(&input)?;
         let (graph, imap) = Graph::new_from_petgraph(&graph);
-        let (components, _) = graph.split_into_components(&imap);
 
         let before = graph.size();
         let mut after = 0;
+
+        let components = graph
+            .split_into_components(&imap)
+            .map(|(c, _)| c)
+            .unwrap_or_else(|| vec![(graph, imap)]);
 
         info!("Starting reduction on {}", filename);
 

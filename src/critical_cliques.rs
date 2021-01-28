@@ -3,6 +3,8 @@ use crate::{
     Graph, Weight,
 };
 
+use std::collections::HashSet;
+
 #[derive(Debug, Clone, Default)]
 pub struct CritClique {
     pub vertices: Vec<usize>,
@@ -66,7 +68,9 @@ pub fn build_crit_clique_graph(g: &Graph<Weight>) -> CritCliqueGraph {
 
             // TODO: Is it maybe worth storing neighbor sets instead of recomputing them?
 
-            if g.closed_neighbors(u).eq(g.closed_neighbors(v)) {
+            if g.closed_neighbors(u).collect::<HashSet<_>>()
+                == g.closed_neighbors(v).collect::<HashSet<_>>()
+            {
                 clique.vertices.push(v);
 
                 visited[v] = true;

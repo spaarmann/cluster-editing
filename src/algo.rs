@@ -40,7 +40,10 @@ pub struct Parameters {
 pub fn execute_algorithm(graph: &PetGraph, params: Parameters) -> PetGraph {
     let mut result = graph.clone();
     let (g, imap) = Graph::<Weight>::new_from_petgraph(&graph);
-    let (components, _) = g.split_into_components(&imap);
+    let components = g
+        .split_into_components(&imap)
+        .map(|(c, _)| c)
+        .unwrap_or_else(|| vec![(g, imap)]);
 
     info!(
         "Decomposed input graph into {} components",
@@ -195,8 +198,8 @@ impl<'a> ProblemInstance<'a> {
         // to do further reductions or splitting as we can't afford any edits anyway.
 
         if self.k > 0.0 {
-            let (components, component_map) = self.g.split_into_components(&self.imap);
-            if components.len() > 1 {
+            if let Some((components, component_map)) = self.g.split_into_components(&self.imap) {
+                //if components.len() > 1 {
                 // If a connected component decomposes into two components, we calculate
                 // the optimum solution for these components separately.
                 // TODO: Still not entirely convinced why this is actually *correct*.
@@ -286,8 +289,39 @@ impl<'a> ProblemInstance<'a> {
                 } else {
                     return None;
                 }
+                //}
             }
         }
+
+        /*if self.g.size() < 5 {
+            log::warn!("g too small");
+        } else if self.g.is_present(3) {
+            log::warn!(
+                "neighbors of 3 before collapse: {:?}, (3,4) = {}, 4 present {}",
+                self.g.neighbors(3).collect::<Vec<_>>(),
+                self.g.get(3, 4),
+                self.g.is_present(4)
+            );
+        } else {
+            log::warn!("3 not present before collapse");
+        }*/
+
+        let collapsed = self.g.collapse(self.imap);
+        self.g = collapsed.0;
+        self.imap = collapsed.1;
+
+        /*if self.g.size() < 5 {
+            log::warn!("g too small");
+        } else if self.g.is_present(3) {
+            log::warn!(
+                "neighbors of 3 after collapse: {:?}, (3,4) = {}, 4 present {}",
+                self.g.neighbors(3).collect::<Vec<_>>(),
+                self.g.get(3, 4),
+                self.g.is_present(4)
+            );
+        } else {
+            log::warn!("3 not present after collapse");
+        }*/
 
         dbg_trace_indent!(self, self.k, "Performing reduction");
         let _k_start = self.k;
@@ -403,9 +437,11 @@ impl<'a> ProblemInstance<'a> {
                 branched.k = self.k - uv as f32;
 
                 if branched.k >= 0.0 {
+                    //log_indent!(
                     dbg_trace_indent!(
                         self,
                         _k_start,
+                        //log::Level::Warn,
                         "Branch: Set {:?}-{:?} forbidden, k after edit: {} !",
                         branched.imap[u],
                         branched.imap[v],
@@ -452,9 +488,11 @@ impl<'a> ProblemInstance<'a> {
                 branched.merge(u, v);
 
                 if branched.k >= 0.0 {
+                    //log_indent!(
                     dbg_trace_indent!(
                         self,
                         _k_start,
+                        //log::Level::Warn,
                         "Branch: Merge {:?}-{:?}, k after merging: {} !",
                         _imap_u,
                         _imap_v,
@@ -475,6 +513,13 @@ impl<'a> ProblemInstance<'a> {
                 None
             }
         };
+
+        /*log_indent!(
+            self,
+            _k_start,
+            log::Level::Warn,
+            "Branching done, going up."
+        );*/
 
         match (res1, res2) {
             (None, None) => None,
@@ -568,7 +613,7 @@ impl<'a> ProblemInstance<'a> {
             &self.edits[_start_edit_len..]
         );
 
-        self.g.set_present(v, false);
+        self.g.set_not_present(v);
         let mut imap_v = self.imap.take(v);
         self.imap[u].append(&mut imap_v);
     }

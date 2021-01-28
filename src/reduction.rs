@@ -627,7 +627,7 @@ fn min_cut(g: &Graph<Weight>, c: &HashSet<usize>, a: usize) -> Weight {
                 g.set(u, w, uw + vw);
             }
         }
-        g.set_present(v, false);
+        g.set_not_present(v);
         c.remove(&v);
     }
 

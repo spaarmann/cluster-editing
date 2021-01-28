@@ -41,9 +41,11 @@ pub struct Graph<T: GraphWeight> {
     /// Any users of this struct that iterate manually over some index range must check themself
     /// whether a vertex is removed, using `.is_present(u)`.
     present: Vec<bool>,
+    present_count: usize,
+    adjacency_lists: Vec<Vec<usize>>,
 }
 
-impl<T: GraphWeight> Graph<T> {
+impl<T: GraphWeight + std::fmt::Display> Graph<T> {
     /// Creates a new empty (without any edges) graph with `size` vertices, with all weights set to
     /// -1.0.
     pub fn new(size: usize) -> Self {
@@ -54,6 +56,8 @@ impl<T: GraphWeight> Graph<T> {
             size,
             matrix: vec![T::NEG_ONE; mat_size],
             present: vec![true; size],
+            present_count: size,
+            adjacency_lists: vec![Vec::new(); size],
         }
     }
 
@@ -126,15 +130,48 @@ impl<T: GraphWeight> Graph<T> {
         debug_assert!(self.present[v]);
         assert_ne!(u, v);
 
+        let prev = self.matrix[u * self.size + v];
         self.matrix[u * self.size + v] = w;
         self.matrix[v * self.size + u] = w;
+
+        if prev <= T::ZERO && w > T::ZERO {
+            self.adjacency_lists[u].push(v);
+            self.adjacency_lists[v].push(u);
+        } else if prev > T::ZERO && w <= T::ZERO {
+            let idx_in_u = self.adjacency_lists[u]
+                .iter()
+                .position(|&x| x == v)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "Failed finding idx_in_u, in set({}, {}, {}) (was {}), adj list of u is {:?}",
+                        u, v, w, prev, self.adjacency_lists[u]
+                    )
+                });
+            self.adjacency_lists[u].swap_remove(idx_in_u);
+
+            let idx_in_v = self.adjacency_lists[v]
+                .iter()
+                .position(|&x| x == u)
+                .unwrap();
+            self.adjacency_lists[v].swap_remove(idx_in_v);
+        }
+
+        /*if (u == 3 && v == 4) || (u == 4 && v == 3) {
+            log::warn!("Set {}-{} to {}, was {}", u, v, w, prev);
+        }
+        if (u == 3 && v == 18) || (u == 18 && v == 3) {
+            log::warn!("Set {}-{} to {}, was {}", u, v, w, prev);
+        }*/
     }
 
     /// Returns an iterator over the open neighborhood of `u` (i.e., not including `u` itself).
     pub fn neighbors(&self, u: usize) -> impl Iterator<Item = usize> + '_ {
         debug_assert!(self.present[u]);
-        self.nodes()
-            .filter(move |&v| u != v && self.get(u, v) > T::ZERO)
+        self.adjacency_lists[u].iter().copied()
+
+        /*self.nodes()
+        .filter(move |&v| u != v && self.get(u, v) > T::ZERO)*/
+
         /*(0..u)
         .filter(move |&v| self.present[v] && self.get(v, u) > T::ZERO)
         .chain(
@@ -144,7 +181,11 @@ impl<T: GraphWeight> Graph<T> {
 
     pub fn neighbors_with_weights(&self, u: usize) -> impl Iterator<Item = (usize, T)> + '_ {
         debug_assert!(self.present[u]);
-        self.nodes().filter_map(move |v| {
+        self.adjacency_lists[u]
+            .iter()
+            .map(move |&x| (x, self.get(u, x)))
+
+        /*self.nodes().filter_map(move |v| {
             if u == v {
                 return None;
             }
@@ -154,14 +195,18 @@ impl<T: GraphWeight> Graph<T> {
             } else {
                 None
             }
-        })
+        })*/
     }
 
     /// Returns an iterator over the closed neighborhood of `u` (i.e., including `u` itself).
     pub fn closed_neighbors(&self, u: usize) -> impl Iterator<Item = usize> + '_ {
         debug_assert!(self.present[u]);
-        self.nodes()
-            .filter(move |&v| u == v || self.get(u, v) > T::ZERO)
+
+        self.neighbors(u).chain(std::iter::once(u))
+
+        /*self.nodes()
+        .filter(move |&v| u == v || self.get(u, v) > T::ZERO)*/
+
         /*(0..u)
         .filter(move |&v| self.present[v] && self.get(v, u) > T::ZERO)
         .chain(std::iter::once(u))
@@ -177,10 +222,12 @@ impl<T: GraphWeight> Graph<T> {
     }
 
     pub fn present_node_count(&self) -> usize {
-        (0..self.size).filter(move |&v| self.present[v]).count()
+        self.present_count
+        //(0..self.size).filter(move |&v| self.present[v]).count()
     }
 
     /// Returns an iterator over all the nodes present in the graph.
+    // TODOL: Is it worth making this an ExactSizeIterator ?
     pub fn nodes(&self) -> impl Iterator<Item = usize> + '_ {
         (0..self.size).filter(move |&v| self.present[v])
     }
@@ -195,15 +242,149 @@ impl<T: GraphWeight> Graph<T> {
         self.present[u]
     }
 
-    pub fn set_present(&mut self, u: usize, present: bool) {
-        self.present[u] = present;
+    pub fn set_not_present(&mut self, u: usize) {
+        assert!(self.present[u]);
+        self.present[u] = false;
+        self.present_count -= 1;
+
+        for i in 0..self.adjacency_lists[u].len() {
+            let v = self.adjacency_lists[u][i];
+            let idx_in_v = self.adjacency_lists[v]
+                .iter()
+                .position(|&x| x == u)
+                .unwrap();
+            self.adjacency_lists[v].swap_remove(idx_in_v);
+        }
+    }
+
+    pub fn collapse(mut self, mut imap: IndexMap) -> (Self, IndexMap) {
+        if self.size == self.present_count {
+            return (self, imap);
+        }
+
+        if self.present_count == 0 {
+            return (Self::new(0), IndexMap::new(0));
+        }
+
+        //log::warn!("collapsing");
+
+        let spam_logs = false
+            && self.size >= 5
+            && self.is_present(3)
+            && !self.is_present(4)
+            && self.neighbors(3).eq([16, 0, 6, 14].iter().copied());
+
+        let mut first_empty = 0;
+        // Find first empty/not-present slot.
+        // By the first if above, we know there is one, so this won't go out of bounds.
+        while self.present[first_empty] {
+            first_empty += 1;
+        }
+
+        let mut last_present = self.size - 1;
+        // Find last slot that is still present.
+        // By the second if above, we know there is one, so this won't go past 0.
+        while !self.present[last_present] {
+            last_present -= 1;
+        }
+
+        while first_empty < last_present {
+            // TODO: I wonder if the weight copying here and the one below can be combined into one pass?
+
+            if spam_logs {
+                log::warn!("first_empty {}, last_present {}", first_empty, last_present);
+                log::warn!(
+                    "weight 3-18: {}, 3 present {}, 18 present {}",
+                    self.get(3, 18),
+                    self.present[3],
+                    self.present[18]
+                );
+            }
+
+            // 1. Swap last_present vertex into slot first_empty.
+
+            // 1.1. Update adjacency lists of every neighbor of last_present.
+            for i in 0..self.adjacency_lists[last_present].len() {
+                let v = self.adjacency_lists[last_present][i];
+                let idx_in_v = self.adjacency_lists[v]
+                    .iter()
+                    .position(|&x| x == last_present)
+                    .unwrap();
+                self.adjacency_lists[v][idx_in_v] = first_empty;
+            }
+            // 1.2. Move adjacency list of last_present itself.
+            self.adjacency_lists.swap(first_empty, last_present);
+            // 1.3. Move imap of last_present.
+            let im = imap.take(last_present);
+            imap.set(first_empty, im);
+            // 1.4. Update present list.
+            self.present[first_empty] = true;
+            self.present[last_present] = false;
+            // 1.5. Update weights to all other present nodes
+            for v in 0..last_present {
+                /*log::warn!(
+                    "1. v {}, v-first_empty was {}, now setting to {}",
+                    v,
+                    self.matrix[v * self.size + first_empty],
+                    self.matrix[v * self.size + last_present]
+                );*/
+                self.matrix[v * self.size + first_empty] =
+                    self.matrix[v * self.size + last_present];
+                /*log::warn!(
+                    "2. v {}, v-first_empty was {}, now setting to {}",
+                    v,
+                    self.matrix[first_empty * self.size + v],
+                    self.matrix[last_present * self.size + v]
+                );*/
+                self.matrix[first_empty * self.size + v] =
+                    self.matrix[last_present * self.size + v];
+            }
+
+            // 2. Find new first_empty and last_present.
+            while first_empty < self.size && self.present[first_empty] {
+                first_empty += 1;
+            }
+            while last_present > 0 && !self.present[last_present] {
+                last_present -= 1;
+            }
+        }
+
+        //log::warn!("2-1 after loop: {}", self.get(2, 1));
+
+        if spam_logs {
+            log::warn!("weight 3-4 after loop: {}", self.get(3, 4));
+        }
+
+        // TODO: Try that weird matrix layout idea to reduce the work done here.
+
+        // Entries are now arranged as desired, just truncate the storage.
+        let new_size = last_present + 1;
+
+        for y in 0..new_size {
+            for x in 0..new_size {
+                self.matrix[y * new_size + x] = self.matrix[y * self.size + x];
+            }
+        }
+
+        self.size = new_size;
+        self.matrix.truncate(self.size * self.size);
+        self.adjacency_lists.truncate(self.size);
+        self.present.truncate(self.size);
+        imap.map.truncate(self.size);
+
+        //log::warn!("2-1 after truncating: {}", self.get(2, 1));
+
+        return (self, imap);
     }
 
     /// Splits a graph into its connected components.
     /// An associated index map is also split into equivalent maps for each individual component.
     /// In addition, this also provides a mapping from vertices in this graph to the index of the
     /// component they are a part of.
-    pub fn split_into_components(&self, imap: &IndexMap) -> (Vec<(Self, IndexMap)>, Vec<usize>) {
+    pub fn split_into_components(
+        &self,
+        imap: &IndexMap,
+    ) -> Option<(Vec<(Self, IndexMap)>, Vec<usize>)> {
         let mut visited = vec![false; self.size];
         let mut stack = Vec::new();
         let mut components = Vec::new();
@@ -234,6 +415,10 @@ impl<T: GraphWeight> Graph<T> {
                 }
             }
 
+            if current.len() == self.present_count {
+                return None;
+            }
+
             let mut comp = Self::new(current.len());
             let mut comp_imap = IndexMap::new(current.len());
             for i in 0..current.len() {
@@ -252,7 +437,7 @@ impl<T: GraphWeight> Graph<T> {
             current.clear();
         }
 
-        (components, component_map)
+        Some((components, component_map))
     }
 }
 
@@ -329,14 +514,19 @@ mod tests {
     use super::*;
 
     fn example_graph() -> Graph<i32> {
-        // 0 -- 1
-        // |    |
-        // 2    3
+        //       1
+        //   0 ----- 1
+        //   |       |
+        // 5 |       | 3
+        //   |       |
+        //   2       3
+        //       -2
 
         let mut g = Graph::new(4);
         g.set(0, 1, 1);
-        g.set(0, 2, 1);
-        g.set(1, 3, 1);
+        g.set(0, 2, 5);
+        g.set(1, 3, 3);
+        g.set(2, 3, -2);
         g
     }
 
@@ -354,9 +544,28 @@ mod tests {
     fn closed_neighbors() {
         let g = example_graph();
 
-        assert_eq!(g.closed_neighbors(0).collect::<Vec<_>>(), vec![0, 1, 2]);
-        assert_eq!(g.closed_neighbors(1).collect::<Vec<_>>(), vec![0, 1, 3]);
+        assert_eq!(g.closed_neighbors(0).collect::<Vec<_>>(), vec![1, 2, 0]);
+        assert_eq!(g.closed_neighbors(1).collect::<Vec<_>>(), vec![0, 3, 1]);
         assert_eq!(g.closed_neighbors(2).collect::<Vec<_>>(), vec![0, 2]);
         assert_eq!(g.closed_neighbors(3).collect::<Vec<_>>(), vec![1, 3]);
+    }
+
+    #[test]
+    fn collapse() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
+        let mut g = example_graph();
+        let size = g.size();
+
+        g.set_not_present(1);
+        let (g, _) = g.collapse(IndexMap::identity(size));
+
+        assert_eq!(g.neighbors(0).collect::<Vec<_>>(), vec![2]);
+        assert_eq!(g.neighbors(1).collect::<Vec<_>>(), vec![]);
+        assert_eq!(g.neighbors(2).collect::<Vec<_>>(), vec![0]);
+
+        assert_eq!(g.get(0, 1), -1);
+        assert_eq!(g.get(2, 1), -2);
+        assert_eq!(g.get(0, 2), 5);
     }
 }
