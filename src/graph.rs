@@ -49,7 +49,6 @@ impl<T: GraphWeight + std::fmt::Display> Graph<T> {
     /// Creates a new empty (without any edges) graph with `size` vertices, with all weights set to
     /// -1.0.
     pub fn new(size: usize) -> Self {
-        assert!(size > 0);
         let mat_size = size * size;
 
         Graph {
@@ -227,7 +226,7 @@ impl<T: GraphWeight + std::fmt::Display> Graph<T> {
     }
 
     /// Returns an iterator over all the nodes present in the graph.
-    // TODOL: Is it worth making this an ExactSizeIterator ?
+    // TODO: Is it worth making this an ExactSizeIterator ?
     pub fn nodes(&self) -> impl Iterator<Item = usize> + '_ {
         (0..self.size).filter(move |&v| self.present[v])
     }
