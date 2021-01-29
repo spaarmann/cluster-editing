@@ -473,21 +473,21 @@ impl<'a> ProblemInstance<'a> {
 
         // 2. Merge uv
         let res2 = {
-            let mut branched = self.fork_new_branch();
+            //let mut branched = self.fork_new_branch();
             //let uv = branched.g.get_mut(u, v);
-            let uv = branched.g.get(u, v);
+            let uv = self.g.get(u, v);
             // TODO: Might not need this check after edge merging is in? Maybe?
             if uv.is_finite() {
-                branched.path_log.push_str(&format!(
+                self.path_log.push_str(&format!(
                     "Branch: Merge {:?}-{:?}, k after merging: {} !\n",
-                    branched.imap[u], branched.imap[v], branched.k
+                    self.imap[u], self.imap[v], self.k
                 ));
 
-                let _imap_u = branched.imap[u].clone();
-                let _imap_v = branched.imap[v].clone();
-                branched.merge(u, v);
+                let _imap_u = self.imap[u].clone();
+                let _imap_v = self.imap[v].clone();
+                self.merge(u, v);
 
-                if branched.k >= 0.0 {
+                if self.k >= 0.0 {
                     //log_indent!(
                     dbg_trace_indent!(
                         self,
@@ -496,9 +496,9 @@ impl<'a> ProblemInstance<'a> {
                         "Branch: Merge {:?}-{:?}, k after merging: {} !",
                         _imap_u,
                         _imap_v,
-                        branched.k
+                        self.k
                     );
-                    branched.find_cluster_editing()
+                    self.find_cluster_editing()
                 } else {
                     dbg_trace_indent!(
                         self,
@@ -514,25 +514,18 @@ impl<'a> ProblemInstance<'a> {
             }
         };
 
-        /*log_indent!(
-            self,
-            _k_start,
-            log::Level::Warn,
-            "Branching done, going up."
-        );*/
-
         match (res1, res2) {
             (None, None) => None,
             (None, Some(r)) => Some(r),
             (Some(r), None) => Some(r),
             (Some(r1), Some(r2)) => {
-                dbg_trace_indent!(
+                /*dbg_trace_indent!(
                     self,
-                    self.k,
+                    _k_start,
                     "Both branches succeeded, with k1={} and k2={}.",
                     r1.k,
                     r2.k
-                );
+                );*/
 
                 if r1.k > r2.k {
                     Some(r1)
