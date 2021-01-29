@@ -10,12 +10,12 @@ pub struct CritClique {
     pub vertices: Vec<usize>,
 }
 
-pub struct CritCliqueGraph {
+pub struct CritCliqueGraph<'g> {
     pub cliques: Vec<CritClique>,
-    pub graph: Graph<Weight>,
+    pub graph: Graph<'g, Weight>,
 }
 
-impl CritCliqueGraph {
+impl<'g> CritCliqueGraph<'g> {
     pub fn into_petgraph(&self) -> petgraph::Graph<String, u8, petgraph::Undirected, u32> {
         use petgraph::prelude::NodeIndex;
 
@@ -44,7 +44,7 @@ impl CritCliqueGraph {
     }
 }
 
-pub fn build_crit_clique_graph(g: &Graph<Weight>) -> CritCliqueGraph {
+pub fn build_crit_clique_graph<'g>(g: &Graph<'g, Weight>) -> CritCliqueGraph<'g> {
     let mut cliques = Vec::new();
 
     // TODO: This looks at least O(n^2) but should apparently be do-able in O(n + m), so have
@@ -80,7 +80,7 @@ pub fn build_crit_clique_graph(g: &Graph<Weight>) -> CritCliqueGraph {
         cliques.push(clique);
     }
 
-    let mut crit_graph = Graph::new(cliques.len());
+    let mut crit_graph = Graph::new(cliques.len(), g.adj_pool);
 
     for c1 in 0..cliques.len() {
         for c2 in 0..cliques.len() {
@@ -116,11 +116,11 @@ fn should_be_neighbors(g: &Graph<Weight>, c1: &CritClique, c2: &CritClique) -> b
 /// graph and merging all critical cliques into a single vertex.
 /// This assumes that the input graph is unweighted (i.e. all weights are +1 or -1 exactly). The
 /// reduced graph will be weighted however.
-pub fn merge_cliques(
-    g: &Graph<Weight>,
+pub fn merge_cliques<'g>(
+    g: &Graph<'g, Weight>,
     imap: &IndexMap,
     _final_path_debugs: &mut String,
-) -> (Graph<Weight>, IndexMap) {
+) -> (Graph<'g, Weight>, IndexMap) {
     let mut crit = build_crit_clique_graph(g);
 
     let mut crit_imap = IndexMap::empty(crit.graph.size());
@@ -590,13 +590,15 @@ fn apply_rule5(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lifeguard::Pool;
 
     #[test]
     fn crit_graph() {
         // This is the example from "Guo: A more effective linear kernelization for cluster
         // editing, 2009", Fig. 1
 
-        let mut graph = Graph::new(9);
+        let p = Pool::with_size(9);
+        let mut graph = Graph::new(9, &p);
         graph.set(0, 1, Weight::ONE);
         graph.set(0, 2, Weight::ONE);
         graph.set(1, 2, Weight::ONE);

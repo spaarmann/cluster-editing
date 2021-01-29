@@ -3,6 +3,7 @@ use cluster_editing::{algo, graphviz, parser, Graph, PetGraph};
 use std::error::Error;
 use std::path::PathBuf;
 
+use lifeguard::Pool;
 use log::info;
 use structopt::StructOpt;
 
@@ -63,7 +64,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     if let Some(path) = opt.print_cliques {
-        let (graph, _) = Graph::new_from_petgraph(&graph);
+        let p = Pool::with_size(graph.node_count());
+        let (graph, _) = Graph::new_from_petgraph(&graph, &p);
         let crit_graph = cluster_editing::critical_cliques::build_crit_clique_graph(&graph);
         graphviz::print_graph(&opt.print_command, path, &crit_graph.into_petgraph());
     }

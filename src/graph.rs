@@ -1,3 +1,5 @@
+use lifeguard::Pool;
+
 pub trait GraphWeight: PartialOrd + Copy {
     const ZERO: Self;
     const ONE: Self;
@@ -28,8 +30,7 @@ impl GraphWeight for i32 {
 /// Edges have weights >0, non-edges have weights <0.
 ///
 /// Accessing self-loop weights will panic!
-#[derive(Clone, Debug)]
-pub struct Graph<T: GraphWeight> {
+pub struct Graph<'a, T: GraphWeight> {
     size: usize,
     /// The graph is internally stored as a full square matrix for each node pair.
     matrix: Vec<T>,
@@ -43,20 +44,51 @@ pub struct Graph<T: GraphWeight> {
     present: Vec<bool>,
     present_count: usize,
     adjacency_lists: Vec<Vec<usize>>,
+    pub adj_pool: &'a Pool<Vec<usize>>,
 }
 
-impl<T: GraphWeight + std::fmt::Display> Graph<T> {
+impl<'a, T: GraphWeight> Drop for Graph<'a, T> {
+    fn drop(&mut self) {
+        for adj in self.adjacency_lists.drain(..) {
+            self.adj_pool.attach(adj);
+        }
+    }
+}
+
+impl<'a, T: GraphWeight + std::fmt::Display> Graph<'a, T> {
     /// Creates a new empty (without any edges) graph with `size` vertices, with all weights set to
     /// -1.0.
-    pub fn new(size: usize) -> Self {
+    pub fn new(size: usize, adj_pool: &'a Pool<Vec<usize>>) -> Self {
         let mat_size = size * size;
+
+        let adjacency_lists = (0..size).map(|_| adj_pool.new().detach()).collect();
 
         Graph {
             size,
             matrix: vec![T::NEG_ONE; mat_size],
             present: vec![true; size],
             present_count: size,
-            adjacency_lists: vec![Vec::new(); size],
+            adjacency_lists,
+            adj_pool,
+        }
+    }
+
+    pub fn fork(&self) -> Self {
+        let adjacency_lists = (0..self.size)
+            .map(|u| {
+                let mut adj = self.adj_pool.new().detach();
+                adj.extend_from_slice(&self.adjacency_lists[u]);
+                adj
+            })
+            .collect();
+
+        Graph {
+            size: self.size,
+            matrix: self.matrix.clone(),
+            present: self.present.clone(),
+            present_count: self.present_count,
+            adjacency_lists,
+            adj_pool: self.adj_pool,
         }
     }
 
@@ -64,8 +96,11 @@ impl<T: GraphWeight + std::fmt::Display> Graph<T> {
     /// given weight 1, non-edges are given weight -1.
     /// A corresponding `IndexMap` is created that maps vertex indices from the returned graph to
     /// the weights associated with the vertices in the petgraph graph.
-    pub fn new_from_petgraph(pg: &crate::PetGraph) -> (Self, IndexMap) {
-        let mut g = Self::new(pg.node_count());
+    pub fn new_from_petgraph(
+        pg: &crate::PetGraph,
+        adj_pool: &'a Pool<Vec<usize>>,
+    ) -> (Self, IndexMap) {
+        let mut g = Self::new(pg.node_count(), adj_pool);
         let mut imap = IndexMap::new(pg.node_count());
 
         for v in pg.node_indices() {
@@ -262,16 +297,8 @@ impl<T: GraphWeight + std::fmt::Display> Graph<T> {
         }
 
         if self.present_count == 0 {
-            return (Self::new(0), IndexMap::new(0));
+            return (Self::new(0, self.adj_pool), IndexMap::new(0));
         }
-
-        //log::warn!("collapsing");
-
-        let spam_logs = false
-            && self.size >= 5
-            && self.is_present(3)
-            && !self.is_present(4)
-            && self.neighbors(3).eq([16, 0, 6, 14].iter().copied());
 
         let mut first_empty = 0;
         // Find first empty/not-present slot.
@@ -289,16 +316,6 @@ impl<T: GraphWeight + std::fmt::Display> Graph<T> {
 
         while first_empty < last_present {
             // TODO: I wonder if the weight copying here and the one below can be combined into one pass?
-
-            if spam_logs {
-                log::warn!("first_empty {}, last_present {}", first_empty, last_present);
-                log::warn!(
-                    "weight 3-18: {}, 3 present {}, 18 present {}",
-                    self.get(3, 18),
-                    self.present[3],
-                    self.present[18]
-                );
-            }
 
             // 1. Swap last_present vertex into slot first_empty.
 
@@ -321,20 +338,8 @@ impl<T: GraphWeight + std::fmt::Display> Graph<T> {
             self.present[last_present] = false;
             // 1.5. Update weights to all other present nodes
             for v in 0..last_present {
-                /*log::warn!(
-                    "1. v {}, v-first_empty was {}, now setting to {}",
-                    v,
-                    self.matrix[v * self.size + first_empty],
-                    self.matrix[v * self.size + last_present]
-                );*/
                 self.matrix[v * self.size + first_empty] =
                     self.matrix[v * self.size + last_present];
-                /*log::warn!(
-                    "2. v {}, v-first_empty was {}, now setting to {}",
-                    v,
-                    self.matrix[first_empty * self.size + v],
-                    self.matrix[last_present * self.size + v]
-                );*/
                 self.matrix[first_empty * self.size + v] =
                     self.matrix[last_present * self.size + v];
             }
@@ -346,12 +351,6 @@ impl<T: GraphWeight + std::fmt::Display> Graph<T> {
             while last_present > 0 && !self.present[last_present] {
                 last_present -= 1;
             }
-        }
-
-        //log::warn!("2-1 after loop: {}", self.get(2, 1));
-
-        if spam_logs {
-            log::warn!("weight 3-4 after loop: {}", self.get(3, 4));
         }
 
         // TODO: Try that weird matrix layout idea to reduce the work done here.
@@ -367,11 +366,12 @@ impl<T: GraphWeight + std::fmt::Display> Graph<T> {
 
         self.size = new_size;
         self.matrix.truncate(self.size * self.size);
-        self.adjacency_lists.truncate(self.size);
         self.present.truncate(self.size);
         imap.map.truncate(self.size);
 
-        //log::warn!("2-1 after truncating: {}", self.get(2, 1));
+        for adj in self.adjacency_lists.drain(self.size..) {
+            self.adj_pool.attach(adj);
+        }
 
         return (self, imap);
     }
@@ -418,7 +418,7 @@ impl<T: GraphWeight + std::fmt::Display> Graph<T> {
                 return None;
             }
 
-            let mut comp = Self::new(current.len());
+            let mut comp = Self::new(current.len(), self.adj_pool);
             let mut comp_imap = IndexMap::new(current.len());
             for i in 0..current.len() {
                 let v = current[i];
@@ -512,7 +512,7 @@ impl std::ops::IndexMut<usize> for IndexMap {
 mod tests {
     use super::*;
 
-    fn example_graph() -> Graph<i32> {
+    fn example_graph(adj_pool: &Pool<Vec<usize>>) -> Graph<i32> {
         //       1
         //   0 ----- 1
         //   |       |
@@ -521,7 +521,7 @@ mod tests {
         //   2       3
         //       -2
 
-        let mut g = Graph::new(4);
+        let mut g = Graph::new(4, adj_pool);
         g.set(0, 1, 1);
         g.set(0, 2, 5);
         g.set(1, 3, 3);
@@ -531,7 +531,8 @@ mod tests {
 
     #[test]
     fn neighbors() {
-        let g = example_graph();
+        let p = Pool::with_size(4);
+        let g = example_graph(&p);
 
         assert_eq!(g.neighbors(0).collect::<Vec<_>>(), vec![1, 2]);
         assert_eq!(g.neighbors(1).collect::<Vec<_>>(), vec![0, 3]);
@@ -541,7 +542,8 @@ mod tests {
 
     #[test]
     fn closed_neighbors() {
-        let g = example_graph();
+        let p = Pool::with_size(4);
+        let g = example_graph(&p);
 
         assert_eq!(g.closed_neighbors(0).collect::<Vec<_>>(), vec![1, 2, 0]);
         assert_eq!(g.closed_neighbors(1).collect::<Vec<_>>(), vec![0, 3, 1]);
@@ -553,7 +555,8 @@ mod tests {
     fn collapse() {
         let _ = env_logger::builder().is_test(true).try_init();
 
-        let mut g = example_graph();
+        let p = Pool::with_size(4);
+        let mut g = example_graph(&p);
         let size = g.size();
 
         g.set_not_present(1);

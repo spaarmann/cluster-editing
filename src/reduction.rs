@@ -617,7 +617,7 @@ pub fn rule5(p: &mut ProblemInstance) -> bool {
 }
 
 fn min_cut(g: &Graph<Weight>, c: &HashSet<usize>, a: usize) -> Weight {
-    let mut g = g.clone();
+    let mut g = g.fork();
     let mut c = c.clone();
 
     fn merge_mc(g: &mut Graph<Weight>, c: &mut HashSet<usize>, u: usize, v: usize) {

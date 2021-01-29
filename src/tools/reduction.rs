@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::path::PathBuf;
 
+use lifeguard::Pool;
 use log::info;
 use structopt::StructOpt;
 
@@ -37,7 +38,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             .expect("input paths are valid UTF-8");
 
         let graph: PetGraph = parser::parse_file(&input)?;
-        let (graph, imap) = Graph::new_from_petgraph(&graph);
+        let p = Pool::with_size(graph.node_count());
+        let (graph, imap) = Graph::new_from_petgraph(&graph, &p);
 
         let before = graph.size();
         let mut after = 0;

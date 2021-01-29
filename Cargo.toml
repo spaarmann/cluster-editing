@@ -9,6 +9,7 @@ default-run = "cluster-editing"
 
 [dependencies]
 env_logger = "0.8.2"
+lifeguard = "0.6.1"
 log = "0.4.11"
 petgraph = "0.5.1"
 rayon = "1.5.0"

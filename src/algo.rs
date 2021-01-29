@@ -5,6 +5,7 @@ use crate::{
     Graph, PetGraph, Weight,
 };
 
+use lifeguard::Pool;
 use log::info;
 use petgraph::graph::NodeIndex;
 
@@ -39,7 +40,9 @@ pub struct Parameters {
 
 pub fn execute_algorithm(graph: &PetGraph, params: Parameters) -> PetGraph {
     let mut result = graph.clone();
-    let (g, imap) = Graph::<Weight>::new_from_petgraph(&graph);
+
+    let adj_pool = Pool::with_size(graph.node_count() * 100); // TODO: better start capacity?
+    let (g, imap) = Graph::<Weight>::new_from_petgraph(&graph, &adj_pool);
     let components = g
         .split_into_components(&imap)
         .map(|(c, _)| c)
@@ -139,7 +142,7 @@ pub fn find_optimal_cluster_editing(
     let mut _path_debugs = String::new();
     let mut instance = ProblemInstance {
         params,
-        g: g.clone(),
+        g: g.fork(),
         imap: imap.clone(),
         k: 0.0,
         k_max: 0.0,
@@ -173,10 +176,9 @@ pub fn find_optimal_cluster_editing(
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct ProblemInstance<'a> {
-    pub params: &'a Parameters,
-    pub g: Graph<Weight>,
+pub struct ProblemInstance<'p, 'g> {
+    pub params: &'p Parameters,
+    pub g: Graph<'g, Weight>,
     pub imap: IndexMap,
     pub k: f32,
     pub k_max: f32,
@@ -185,9 +187,18 @@ pub struct ProblemInstance<'a> {
     pub path_log: String,
 }
 
-impl<'a> ProblemInstance<'a> {
+impl<'p, 'g> ProblemInstance<'p, 'g> {
     fn fork_new_branch(&self) -> Self {
-        self.clone()
+        ProblemInstance {
+            params: self.params,
+            g: self.g.fork(),
+            imap: self.imap.clone(),
+            k: self.k,
+            k_max: self.k_max,
+            full_reduction_counter: self.full_reduction_counter,
+            edits: self.edits.clone(),
+            path_log: self.path_log.clone(),
+        }
     }
 
     /// Tries to find a solution of size <= k for this problem instance.
