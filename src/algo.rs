@@ -5,6 +5,8 @@ use crate::{
     Graph, PetGraph, Weight,
 };
 
+use std::collections::HashMap;
+
 use log::info;
 use petgraph::graph::NodeIndex;
 
@@ -35,6 +37,7 @@ impl Edit {
 #[derive(Debug)]
 pub struct Parameters {
     pub full_reduction_interval: i32,
+    pub debug_opts: HashMap<String, String>,
 }
 
 pub fn execute_algorithm(graph: &PetGraph, params: Parameters) -> PetGraph {
@@ -151,6 +154,21 @@ pub fn find_optimal_cluster_editing(
         original_node_count,
         instance.g.size()
     );
+
+    if let Some(only_k) = params.debug_opts.get("only_k") {
+        let only_k = only_k.parse::<usize>().unwrap();
+        info!("[driver] Doing a single search with k={}...", only_k);
+
+        let mut instance = instance.fork_new_branch();
+        instance.k = only_k as f32;
+        if let Some(instance) = instance.find_cluster_editing() {
+            log::info!("Found solution, final path log:\n{}", instance.path_log);
+            return (instance.k as i32, instance.edits);
+        } else {
+            log::warn!("Found no solution!");
+            return (0, Vec::new());
+        }
+    }
 
     let mut k = k_start;
     loop {
