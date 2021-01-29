@@ -1,5 +1,6 @@
 use cluster_editing::{algo, graphviz, parser, Graph, PetGraph};
 
+use std::collections::HashMap;
 use std::error::Error;
 use std::path::PathBuf;
 
@@ -45,6 +46,9 @@ struct Opt {
 
     #[structopt(long = "full-reduction-interval", default_value = "6")]
     full_reduction_interval: i32,
+
+    #[structopt(short = "d", long = "debug", parse(try_from_str = parse_key_val), number_of_values = 1)]
+    debug_options: Option<Vec<(String, String)>>,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -70,9 +74,17 @@ fn main() -> Result<(), Box<dyn Error>> {
         graphviz::print_graph(&opt.print_command, path, &crit_graph.into_petgraph());
     }
 
+    let debug_opts = opt
+        .debug_options
+        .map(|o| o.into_iter().collect())
+        .unwrap_or_else(|| HashMap::new());
+
     let params = algo::Parameters {
         full_reduction_interval: opt.full_reduction_interval,
+        debug_opts,
     };
+
+    info!("Running with debug options: {:?}", params.debug_opts);
 
     let result = algo::execute_algorithm(&graph, params);
 
@@ -87,4 +99,19 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     Ok(())
+}
+
+use std::str::FromStr;
+// Based on structopt's `keyvalue` example.
+fn parse_key_val<K, V>(s: &str) -> Result<(K, V), Box<dyn Error>>
+where
+    K: FromStr,
+    K::Err: Error + 'static,
+    V: FromStr,
+    V::Err: Error + 'static,
+{
+    let pos = s
+        .find('=')
+        .ok_or_else(|| format!("invalid key=value pair: no `=` found in `{}`", s))?;
+    Ok((s[..pos].parse()?, s[pos + 1..].parse()?))
 }

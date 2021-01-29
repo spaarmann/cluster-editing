@@ -55,6 +55,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             let (cg, imap) = c;
             let params = cluster_editing::algo::Parameters {
                 full_reduction_interval: 6,
+                debug_opts: HashMap::new(),
             };
             let mut instance = cluster_editing::algo::ProblemInstance {
                 params: &params,
