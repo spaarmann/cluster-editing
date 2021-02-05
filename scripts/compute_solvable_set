@@ -1,0 +1,52 @@
+#!/usr/bin/env fish
+
+# Parse command line args
+set argc (count $argv)
+if test "$argc" != 2
+	echo "Usage: compute_solvable_set <timeout> <num_workers>"
+	exit 1
+else
+	set timeout "$argv[1]"
+	set num_workers "$argv[2]"
+end
+
+# Get git revision and check for unstaged changes
+git update-index --refresh > /dev/null
+git diff-index --quiet HEAD
+if test $status -ne 0
+	echo "You have unstaged changes!"
+	exit 2
+end
+
+set revision (git rev-parse --short HEAD)
+set start_time (date -Isecond)
+
+echo "Starting complete run with $num_workers threads and a timeout of $timeout minutes."
+echo "Revision: $revision, date: $start_time"
+
+rm runner_out/*
+
+# Build and run
+RUSTFLAGS='-C target-cpu=native' cargo build --release
+RUSTFLAGS='-C target-cpu=native' cargo run --release --bin runner -- --num-workers $num_workers --timeout $timeout runner_out instances/exact*.gr &| tee runner_out/summary
+
+# Copy output to storage
+set out_dir "data/runs/full/"$revision"_$start_time"
+mkdir -p "$out_dir"
+
+echo "Storing run results at $out_dir"
+
+cp -r runner_out "$out_dir/"
+
+echo "Executed with $num_workers threads and $timeout minute timeout." > "$out_dir/summary"
+echo "Revision $revision and start time $start_time" >> "$out_dir/summary"
+cat "$out_dir/runner_out/summary" >> "$out_dir/summary"
+
+# Gather list of completed instances
+grep -r "Output graph has" "runner_out/" | cut -d ":" -f 1 | cut -d "/" -f 2 | sed 's/.out//g' | sed 's/^/instances\//' > "$out_dir/completed_instances"
+
+echo "" >> "$out_dir/summary"
+echo "Completed Instances:" >> "$out_dir/summary"
+cat "$out_dir/completed_instances" >> "$out_dir/summary"
+
+echo "Complete run completed."

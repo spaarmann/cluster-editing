@@ -1,0 +1,55 @@
+#!/usr/bin/env fish
+
+# Parse command line args
+set argc (count $argv)
+if test "$argc" != 3
+	echo "Usage: perf_test <instance_file> <timeout> <num_workers>"
+	exit 1
+else
+	set instance_file "$argv[1]"
+	set timeout "$argv[2]"
+	set num_workers "$argv[3]"
+end
+
+# Get git revision and check for unstaged changes
+git update-index --refresh > /dev/null
+git diff-index --quiet HEAD
+if test $status -ne 0
+	echo "You have unstaged changes!"
+	exit 2
+end
+
+set revision (git rev-parse --short HEAD)
+set start_time (date -Isecond)
+
+echo "Starting perf run with $num_workers threads and a timeout of $timeout minutes."
+echo "Revision: $revision, date: $start_time"
+echo "Instance file: $instance_file"
+
+# Store run info in summary file
+set out_dir "data/runs/perf/"$revision"_$start_time"
+mkdir -p "$out_dir"
+
+echo "Executed with $num_workers threads and $timeout minute timeout." > "$out_dir/summary"
+echo "Revision $revision and start time $start_time" >> "$out_dir/summary"
+echo "Instance file: $instance_file" >> "$out_dir/summary"
+echo "Instances:" >> "$out_dir/summary"
+cat "$instance_file" >> "$out_dir/summary"
+
+rm runner_out/*
+
+# Build and run
+RUSTFLAGS='-C target-cpu=native' cargo build --release
+RUSTFLAGS='-C target-cpu=native' cargo run --release --bin runner -- --num-workers $num_workers --timeout $timeout runner_out (cat "$instance_file") &| tee runner_out/summary
+
+# Store and output timing
+set total_time (grep "Done. " "runner_out/summary" | sed -r 's/.* in ([0-9\.]+) seconds.*/\1/g')
+echo "Took $total_time seconds."
+echo "Took $total_time seconds." >> "$out_dir/summary"
+
+# Copy output to storage
+echo "Storing run reults at $out_dir"
+cp -r runner_out "$out_dir/"
+cat "$out_dir/runner_out/summary" >> "$out_dir/summary"
+
+echo "Perf run completed."
