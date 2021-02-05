@@ -41,6 +41,7 @@ pub struct Graph<T: GraphWeight> {
     /// Any users of this struct that iterate manually over some index range must check themself
     /// whether a vertex is removed, using `.is_present(u)`.
     present: Vec<bool>,
+    present_count: usize,
 }
 
 impl<T: GraphWeight> Graph<T> {
@@ -54,6 +55,7 @@ impl<T: GraphWeight> Graph<T> {
             size,
             matrix: vec![T::NEG_ONE; mat_size],
             present: vec![true; size],
+            present_count: size,
         }
     }
 
@@ -177,7 +179,8 @@ impl<T: GraphWeight> Graph<T> {
     }
 
     pub fn present_node_count(&self) -> usize {
-        (0..self.size).filter(move |&v| self.present[v]).count()
+        self.present_count
+        //(0..self.size).filter(move |&v| self.present[v]).count()
     }
 
     /// Returns an iterator over all the nodes present in the graph.
@@ -195,8 +198,10 @@ impl<T: GraphWeight> Graph<T> {
         self.present[u]
     }
 
-    pub fn set_present(&mut self, u: usize, present: bool) {
-        self.present[u] = present;
+    pub fn set_not_present(&mut self, u: usize) {
+        assert!(self.present[u]);
+        self.present[u] = false;
+        self.present_count -= 1;
     }
 
     /// Splits a graph into its connected components.

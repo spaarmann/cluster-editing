@@ -521,6 +521,7 @@ impl<'a> ProblemInstance<'a> {
     pub fn merge(&mut self, u: usize, v: usize) {
         assert!(self.g.is_present(u));
         assert!(self.g.is_present(v));
+        assert!(self.g.get(u, v) > Weight::ZERO);
 
         let _start_k = self.k;
         let _start_edit_len = self.edits.len();
@@ -586,7 +587,7 @@ impl<'a> ProblemInstance<'a> {
             &self.edits[_start_edit_len..]
         );
 
-        self.g.set_present(v, false);
+        self.g.set_not_present(v);
         let mut imap_v = self.imap.take(v);
         self.imap[u].append(&mut imap_v);
     }
