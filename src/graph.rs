@@ -62,6 +62,7 @@ impl<'a, T: GraphWeight + std::fmt::Display> Graph<'a, T> {
         let mat_size = size * size;
 
         let adjacency_lists = (0..size).map(|_| adj_pool.new().detach()).collect();
+        //let adjacency_lists = vec![];
 
         Graph {
             size,
@@ -81,6 +82,7 @@ impl<'a, T: GraphWeight + std::fmt::Display> Graph<'a, T> {
                 adj
             })
             .collect();
+        //let adjacency_lists = vec![];
 
         Graph {
             size: self.size,
@@ -189,13 +191,6 @@ impl<'a, T: GraphWeight + std::fmt::Display> Graph<'a, T> {
                 .unwrap();
             self.adjacency_lists[v].swap_remove(idx_in_v);
         }
-
-        /*if (u == 3 && v == 4) || (u == 4 && v == 3) {
-            log::warn!("Set {}-{} to {}, was {}", u, v, w, prev);
-        }
-        if (u == 3 && v == 18) || (u == 18 && v == 3) {
-            log::warn!("Set {}-{} to {}, was {}", u, v, w, prev);
-        }*/
     }
 
     /// Returns an iterator over the open neighborhood of `u` (i.e., not including `u` itself).
@@ -384,6 +379,7 @@ impl<'a, T: GraphWeight + std::fmt::Display> Graph<'a, T> {
         &self,
         imap: &IndexMap,
     ) -> Option<(Vec<(Self, IndexMap)>, Vec<usize>)> {
+        //) -> (Vec<(Self, IndexMap)>, Vec<usize>) {
         let mut visited = vec![false; self.size];
         let mut stack = Vec::new();
         let mut components = Vec::new();
@@ -391,6 +387,8 @@ impl<'a, T: GraphWeight + std::fmt::Display> Graph<'a, T> {
         let mut current = Vec::new();
 
         let mut component_map = vec![0; self.size];
+
+        let mut would_have_been_none = false;
 
         for u in 0..self.size {
             if visited[u] || !self.present[u] {
@@ -415,6 +413,10 @@ impl<'a, T: GraphWeight + std::fmt::Display> Graph<'a, T> {
             }
 
             if current.len() == self.present_count {
+                would_have_been_none = true;
+            }
+
+            if current.len() == self.present_count {
                 return None;
             }
 
@@ -436,7 +438,10 @@ impl<'a, T: GraphWeight + std::fmt::Display> Graph<'a, T> {
             current.clear();
         }
 
+        assert_eq!(would_have_been_none, components.len() == 1);
+
         Some((components, component_map))
+        //(components, component_map)
     }
 }
 
@@ -551,7 +556,7 @@ mod tests {
         assert_eq!(g.closed_neighbors(3).collect::<Vec<_>>(), vec![1, 3]);
     }
 
-    #[test]
+    /*#[test]
     fn collapse() {
         let _ = env_logger::builder().is_test(true).try_init();
 
@@ -569,5 +574,5 @@ mod tests {
         assert_eq!(g.get(0, 1), -1);
         assert_eq!(g.get(2, 1), -2);
         assert_eq!(g.get(0, 2), 5);
-    }
+    }*/
 }

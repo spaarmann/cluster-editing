@@ -50,6 +50,7 @@ pub fn execute_algorithm(graph: &PetGraph, params: Parameters) -> PetGraph {
         .split_into_components(&imap)
         .map(|(c, _)| c)
         .unwrap_or_else(|| vec![(g, imap)]);
+    //let (components, _) = g.split_into_components(&imap);
 
     info!(
         "Decomposed input graph into {} components",
@@ -228,129 +229,106 @@ impl<'p, 'g> ProblemInstance<'p, 'g> {
 
         if self.k > 0.0 {
             if let Some((components, component_map)) = self.g.split_into_components(&self.imap) {
-                //if components.len() > 1 {
-                // If a connected component decomposes into two components, we calculate
-                // the optimum solution for these components separately.
-                // TODO: Still not entirely convinced why this is actually *correct*.
+                //let (components, component_map) = self.g.split_into_components(&self.imap);
+                if components.len() > 1 {
+                    // If a connected component decomposes into two components, we calculate
+                    // the optimum solution for these components separately.
+                    // TODO: Still not entirely convinced why this is actually *correct*.
 
-                let _k_start = self.k;
-                for (_i, (comp, comp_imap)) in components.into_iter().enumerate() {
-                    dbg_trace_indent!(
-                        self,
-                        _k_start,
-                        "Starting component {}, remaining k is {}",
-                        _i,
-                        self.k
-                    );
-                    self.path_log.push_str(&format!(
-                        "Starting component {}, remaining k is {}\n",
-                        _i, self.k
-                    ));
+                    let _k_start = self.k;
+                    for (_i, (comp, comp_imap)) in components.into_iter().enumerate() {
+                        dbg_trace_indent!(
+                            self,
+                            _k_start,
+                            "Starting component {}, remaining k is {}",
+                            _i,
+                            self.k
+                        );
+                        self.path_log.push_str(&format!(
+                            "Starting component {}, remaining k is {}\n",
+                            _i, self.k
+                        ));
 
-                    let comp_instance = ProblemInstance {
-                        params: self.params,
-                        g: comp,
-                        imap: comp_imap,
-                        k: self.k,
-                        k_max: self.k_max,
-                        full_reduction_counter: self.full_reduction_counter,
-                        edits: self.edits,
-                        path_log: self.path_log,
-                    };
+                        let comp_instance = ProblemInstance {
+                            params: self.params,
+                            g: comp,
+                            imap: comp_imap,
+                            k: self.k,
+                            k_max: self.k_max,
+                            full_reduction_counter: self.full_reduction_counter,
+                            edits: self.edits,
+                            path_log: self.path_log,
+                        };
 
-                    // returns early if we can't even find a solution for the component,
-                    // otherwise take the remaining k and proceed to the next component.
-                    match comp_instance.find_cluster_editing() {
-                        Some(comp_instance) => {
-                            self.k = comp_instance.k;
-                            self.edits = comp_instance.edits;
-                            self.path_log = comp_instance.path_log;
+                        // returns early if we can't even find a solution for the component,
+                        // otherwise take the remaining k and proceed to the next component.
+                        match comp_instance.find_cluster_editing() {
+                            Some(comp_instance) => {
+                                self.k = comp_instance.k;
+                                self.edits = comp_instance.edits;
+                                self.path_log = comp_instance.path_log;
+                            }
+                            None => {
+                                dbg_trace_indent!(
+                                    self,
+                                    _k_start,
+                                    "Finished component {} with 'no solution found', returning.",
+                                    _i
+                                );
+                                return None;
+                            }
                         }
-                        None => {
-                            dbg_trace_indent!(
-                                self,
-                                _k_start,
-                                "Finished component {} with 'no solution found', returning.",
-                                _i
-                            );
-                            return None;
-                        }
+
+                        dbg_trace_indent!(
+                            self,
+                            _k_start,
+                            "Finished component {}, remaining k is {}",
+                            _i,
+                            self.k
+                        );
+                        self.path_log.push_str(&format!(
+                            "Finished component {}, remaining k is {}\n",
+                            _i, self.k
+                        ));
                     }
 
-                    dbg_trace_indent!(
-                        self,
-                        _k_start,
-                        "Finished component {}, remaining k is {}",
-                        _i,
-                        self.k
-                    );
-                    self.path_log.push_str(&format!(
-                        "Finished component {}, remaining k is {}\n",
-                        _i, self.k
-                    ));
-                }
-
-                // We still need to "cash in" any zero-edges that connect the different components.
-                let mut zero_count = 0.0;
-                for u in 0..self.g.size() {
-                    continue_if_not_present!(self.g, u);
-                    for v in (u + 1)..self.g.size() {
-                        continue_if_not_present!(self.g, v);
-                        if component_map[u] != component_map[v] {
-                            if self.g.get(u, v) == Weight::ZERO {
-                                zero_count += 1.0;
+                    // We still need to "cash in" any zero-edges that connect the different components.
+                    let mut zero_count = 0.0;
+                    for u in 0..self.g.size() {
+                        continue_if_not_present!(self.g, u);
+                        for v in (u + 1)..self.g.size() {
+                            continue_if_not_present!(self.g, v);
+                            if component_map[u] != component_map[v] {
+                                if self.g.get(u, v) == Weight::ZERO {
+                                    zero_count += 1.0;
+                                }
                             }
                         }
                     }
-                }
 
-                self.k -= zero_count / 2.0;
+                    self.k -= zero_count / 2.0;
 
-                dbg_trace_indent!(
-                    self,
-                    _k_start,
-                    "After component split, cashed zero-edges, k now {}",
-                    self.k
-                );
+                    dbg_trace_indent!(
+                        self,
+                        _k_start,
+                        "After component split, cashed zero-edges, k now {}",
+                        self.k
+                    );
 
-                if self.k >= 0.0 {
-                    return Some(self);
-                } else {
-                    return None;
-                }
-                //}
+                    if self.k >= 0.0 {
+                        return Some(self);
+                    } else {
+                        return None;
+                    }
+                } /* else {
+                      log::error!("Got Some() but length {}", components.len());
+                  }*/
             }
         }
 
-        /*if self.g.size() < 5 {
-            log::warn!("g too small");
-        } else if self.g.is_present(3) {
-            log::warn!(
-                "neighbors of 3 before collapse: {:?}, (3,4) = {}, 4 present {}",
-                self.g.neighbors(3).collect::<Vec<_>>(),
-                self.g.get(3, 4),
-                self.g.is_present(4)
-            );
-        } else {
-            log::warn!("3 not present before collapse");
-        }*/
-
-        let collapsed = self.g.collapse(self.imap);
+        /*let collapsed = self.g.collapse(self.imap);
         self.g = collapsed.0;
-        self.imap = collapsed.1;
-
-        /*if self.g.size() < 5 {
-            log::warn!("g too small");
-        } else if self.g.is_present(3) {
-            log::warn!(
-                "neighbors of 3 after collapse: {:?}, (3,4) = {}, 4 present {}",
-                self.g.neighbors(3).collect::<Vec<_>>(),
-                self.g.get(3, 4),
-                self.g.is_present(4)
-            );
-        } else {
-            log::warn!("3 not present after collapse");
-        }*/
+        self.imap = collapsed.1;*/
 
         dbg_trace_indent!(self, self.k, "Performing reduction");
         let _k_start = self.k;
@@ -502,21 +480,21 @@ impl<'p, 'g> ProblemInstance<'p, 'g> {
 
         // 2. Merge uv
         let res2 = {
-            //let mut branched = self.fork_new_branch();
-            //let uv = branched.g.get_mut(u, v);
-            let uv = self.g.get(u, v);
+            let mut branched = self.fork_new_branch();
+            let uv = branched.g.get(u, v);
+            //let uv = self.g.get(u, v);
             // TODO: Might not need this check after edge merging is in? Maybe?
             if uv.is_finite() {
-                self.path_log.push_str(&format!(
+                branched.path_log.push_str(&format!(
                     "Branch: Merge {:?}-{:?}, k after merging: {} !\n",
-                    self.imap[u], self.imap[v], self.k
+                    branched.imap[u], branched.imap[v], branched.k
                 ));
 
-                let _imap_u = self.imap[u].clone();
-                let _imap_v = self.imap[v].clone();
-                self.merge(u, v);
+                let _imap_u = branched.imap[u].clone();
+                let _imap_v = branched.imap[v].clone();
+                branched.merge(u, v);
 
-                if self.k >= 0.0 {
+                if branched.k >= 0.0 {
                     //log_indent!(
                     dbg_trace_indent!(
                         self,
@@ -525,9 +503,9 @@ impl<'p, 'g> ProblemInstance<'p, 'g> {
                         "Branch: Merge {:?}-{:?}, k after merging: {} !",
                         _imap_u,
                         _imap_v,
-                        self.k
+                        branched.k
                     );
-                    self.find_cluster_editing()
+                    branched.find_cluster_editing()
                 } else {
                     dbg_trace_indent!(
                         self,

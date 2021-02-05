@@ -237,10 +237,10 @@ pub fn rule3(p: &mut ProblemInstance) -> bool {
         // This rule is already "symmetric" so we only go through pairs in one order, not
         // either order.
 
-        let sum_u_total =
-            p.g.neighbors_with_weights(u)
-                .map(|(_, w)| w)
-                .sum::<Weight>();
+        /*let sum_u_total =
+        p.g.neighbors_with_weights(u)
+            .map(|(_, w)| w)
+            .sum::<Weight>();*/
 
         for v in (u + 1)..p.g.size() {
             continue_if_not_present!(p.g, v);
@@ -250,12 +250,21 @@ pub fn rule3(p: &mut ProblemInstance) -> bool {
                 continue;
             }
 
-            let sum_v_total =
+            /*let sum_v_total =
                 p.g.neighbors_with_weights(v)
                     .map(|(_, w)| w)
                     .sum::<Weight>();
 
-            let sum = sum_u_total - uv + sum_v_total - uv;
+            let sum = sum_u_total - uv + sum_v_total - uv;*/
+
+            let sum =
+                p.g.neighbors(u)
+                    .map(|w| if w == v { Weight::ZERO } else { p.g.get(u, w) })
+                    .sum::<Weight>()
+                    + p.g
+                        .neighbors(v)
+                        .map(|w| if w == u { Weight::ZERO } else { p.g.get(v, w) })
+                        .sum::<Weight>();
 
             if uv >= sum {
                 dbg_trace_indent!(p, p.k, "rule3 merge {:?}-{:?}", p.imap[u], p.imap[v]);

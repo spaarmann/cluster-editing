@@ -48,6 +48,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             .split_into_components(&imap)
             .map(|(c, _)| c)
             .unwrap_or_else(|| vec![(graph, imap)]);
+        //let (components, _) = graph.split_into_components(&imap);
 
         info!("Starting reduction on {}", filename);
 
