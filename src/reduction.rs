@@ -451,9 +451,17 @@ pub fn rule5(p: &mut ProblemInstance) -> bool {
         }
     };
 
-    fn compute_max(d: &R5Data, upper_bound: Weight) -> Weight {
+    fn compute_max(
+        d: &R5Data,
+        m: &mut Vec<Option<isize>>,
+        m_prev: &mut Vec<Option<isize>>,
+        upper_bound: Weight,
+    ) -> Weight {
         let m_size = (2.0 * d.max_x + 1.0).ceil() as usize;
-        let mut m: Vec<Option<isize>> = vec![None; m_size];
+
+        //let mut m: Vec<Option<isize>> = vec![None; m_size];
+        m.extend(std::iter::repeat(None).take(m_size));
+
         let mut m_inf: Option<isize> = None; // Extra entry "in" m for infinity values
 
         // [-max_x, ..., -1, 0, 1, ..., max_x]
@@ -470,7 +478,9 @@ pub fn rule5(p: &mut ProblemInstance) -> bool {
             let x = x_j as isize;
             let y = y_j as isize;
 
-            let m_prev = m.clone();
+            //let m_prev = m.clone();
+            m_prev.clear();
+            m_prev.extend_from_slice(m);
 
             // TODO: The handling for when y_j is -Inf here seems.. iffy. I've just used
             // saturating_add to handle it somehow, but, uh, not sure how correct that is.
@@ -583,7 +593,9 @@ pub fn rule5(p: &mut ProblemInstance) -> bool {
                 continue;
             }
 
-            let max = compute_max(&d, uv);
+            p.r5_m.clear();
+            p.r5_m_prev.clear();
+            let max = compute_max(&d, &mut p.r5_m, &mut p.r5_m_prev, uv);
 
             if uv > max {
                 dbg_trace_indent!(
