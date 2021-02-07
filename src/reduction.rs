@@ -393,21 +393,24 @@ pub fn rule4(p: &mut ProblemInstance) -> bool {
 }
 
 pub fn rule5(p: &mut ProblemInstance) -> bool {
-    #[derive(Clone)]
-    struct R5Data {
+    struct R5Data<'a> {
         delta_u: Weight,
         delta_v: Weight,
         max_x: Weight,
         relative_difference: Weight,
-        relevant_pairs: Vec<(Weight, Weight)>,
+        relevant_pairs: &'a mut Vec<(Weight, Weight)>,
     }
 
-    fn compute_initial_data(g: &Graph<Weight>, u: usize, v: usize) -> R5Data {
+    fn compute_initial_data<'a>(
+        g: &Graph<Weight>,
+        relevant_pairs: &'a mut Vec<(Weight, Weight)>,
+        u: usize,
+        v: usize,
+    ) -> R5Data<'a> {
         let mut delta_u = Weight::ZERO;
         let mut delta_v = Weight::ZERO;
         let mut max_x = Weight::ZERO;
         let mut relative_difference = Weight::ZERO;
-        let mut relevant_pairs = Vec::new();
 
         for w in g.nodes() {
             if w == u || w == v {
@@ -448,7 +451,7 @@ pub fn rule5(p: &mut ProblemInstance) -> bool {
         }
     };
 
-    fn compute_max(d: R5Data, upper_bound: Weight) -> Weight {
+    fn compute_max(d: &R5Data, upper_bound: Weight) -> Weight {
         let m_size = (2.0 * d.max_x + 1.0).ceil() as usize;
         let mut m: Vec<Option<isize>> = vec![None; m_size];
         let mut m_inf: Option<isize> = None; // Extra entry "in" m for infinity values
@@ -461,7 +464,7 @@ pub fn rule5(p: &mut ProblemInstance) -> bool {
         // Initialize array
         m[get_idx(0)] = Some(0);
 
-        for (x_j, y_j) in d.relevant_pairs {
+        for &(x_j, y_j) in d.relevant_pairs.iter() {
             let mut max_value = 0;
 
             let x = x_j as isize;
@@ -549,7 +552,8 @@ pub fn rule5(p: &mut ProblemInstance) -> bool {
                 continue;
             }
 
-            let d = compute_initial_data(&p.g, u, v);
+            p.r5_relevant_pairs.clear();
+            let d = compute_initial_data(&p.g, &mut p.r5_relevant_pairs, u, v);
 
             if uv <= Weight::min(d.delta_u, d.delta_v) {
                 // No chance of satisfying condition
@@ -579,8 +583,7 @@ pub fn rule5(p: &mut ProblemInstance) -> bool {
                 continue;
             }
 
-            let _d = d.clone();
-            let max = compute_max(d, uv);
+            let max = compute_max(&d, uv);
 
             if uv > max {
                 dbg_trace_indent!(
@@ -590,9 +593,9 @@ pub fn rule5(p: &mut ProblemInstance) -> bool {
                     p.imap[u],
                     p.imap[v],
                     uv,
-                    _d.relative_difference,
-                    _d.delta_u,
-                    _d.delta_v,
+                    d.relative_difference,
+                    d.delta_u,
+                    d.delta_v,
                     max,
                     p.edits
                 );

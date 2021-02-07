@@ -146,6 +146,7 @@ pub fn find_optimal_cluster_editing(
         full_reduction_counter: 0,
         edits: Vec::new(),
         path_log: String::new(),
+        r5_relevant_pairs: Vec::new(),
     };
     let k_start = reduction::initial_param_independent_reduction(&mut instance);
 
@@ -198,6 +199,9 @@ pub struct ProblemInstance<'a> {
     pub full_reduction_counter: i32,
     pub edits: Vec<Edit>,
     pub path_log: String,
+
+    // Helpers for `reduction`, stored here to avoid allocating new ones as much.
+    pub r5_relevant_pairs: Vec<(Weight, Weight)>,
 }
 
 impl<'a> ProblemInstance<'a> {
@@ -242,6 +246,7 @@ impl<'a> ProblemInstance<'a> {
                         full_reduction_counter: self.full_reduction_counter,
                         edits: self.edits,
                         path_log: self.path_log,
+                        r5_relevant_pairs: self.r5_relevant_pairs,
                     };
 
                     // returns early if we can't even find a solution for the component,
@@ -251,6 +256,7 @@ impl<'a> ProblemInstance<'a> {
                             self.k = comp_instance.k;
                             self.edits = comp_instance.edits;
                             self.path_log = comp_instance.path_log;
+                            self.r5_relevant_pairs = comp_instance.r5_relevant_pairs;
                         }
                         None => {
                             dbg_trace_indent!(

@@ -60,6 +60,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 full_reduction_counter: 0,
                 edits: Vec::new(),
                 path_log: String::new(),
+                r5_relevant_pairs: Vec::new(),
             };
             reduction::initial_param_independent_reduction(&mut instance);
 
