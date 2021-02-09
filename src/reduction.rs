@@ -51,48 +51,44 @@ pub fn full_param_independent_reduction(p: &mut ProblemInstance) {
     );
 
     let mut applied_any_rule = true;
-    while applied_any_rule && p.k > 0.0 {
+    while applied_any_rule && p.k > 0.0 && p.g.present_node_count() > 1 {
         applied_any_rule = false;
 
-        let r5 = true;
-        let r4 = true;
-        let r3 = true;
-        let r2 = true;
-        let r1 = true;
-
         // Rule 1 (heavy non-edge rule)
-        if r1 {
-            applied_any_rule |= rule1(p);
+        while rule1(p) {
+            applied_any_rule = true;
         }
 
         // Rule 2 (heavy edge rule, single end)
-        if r2 {
-            applied_any_rule |= rule2(p);
+        while rule2(p) {
+            applied_any_rule = true;
+        }
+
+        if applied_any_rule {
+            continue;
         }
 
         // Rule 3 (heavy edge rule, both ends)
-        if r3 {
-            applied_any_rule |= rule3(p);
+        while rule3(p) {
+            applied_any_rule = true;
         }
 
-        if p.g.present_node_count() <= 1 {
-            break;
+        if applied_any_rule {
+            continue;
         }
 
         // Rule 4
-        if r4 {
-            applied_any_rule |= rule4(p);
+        while rule4(p) {
+            applied_any_rule = true;
         }
 
-        // Try Rule 5 only if no other rules could be applied
         if applied_any_rule {
             continue;
         }
 
         // Rule 5
-        if r5 {
-            applied_any_rule = rule5(p);
-        }
+        // TODO: Try looping this?
+        applied_any_rule = rule5(p);
     }
 
     dbg_trace_indent!(
@@ -118,30 +114,30 @@ pub fn fast_param_independent_reduction(p: &mut ProblemInstance) {
     );
 
     let mut applied_any_rule = true;
-    while applied_any_rule && p.k > 0.0 {
+    while applied_any_rule && p.k > 0.0 && p.g.present_node_count() > 1 {
         applied_any_rule = false;
 
-        let r3 = true;
-        let r2 = true;
-        let r1 = true;
-
         // Rule 1 (heavy non-edge rule)
-        if r1 {
-            applied_any_rule |= rule1(p);
+        while rule1(p) {
+            applied_any_rule = true;
+        }
+
+        if applied_any_rule {
+            continue;
         }
 
         // Rule 2 (heavy edge rule, single end)
-        if r2 {
-            applied_any_rule |= rule2(p);
+        while rule2(p) {
+            applied_any_rule = true;
+        }
+
+        if applied_any_rule {
+            continue;
         }
 
         // Rule 3 (heavy edge rule, both ends)
-        if r3 {
-            applied_any_rule |= rule3(p);
-        }
-
-        if p.g.present_node_count() <= 1 {
-            break;
+        while rule3(p) {
+            applied_any_rule = true;
         }
     }
 
