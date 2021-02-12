@@ -535,7 +535,10 @@ impl<'a> ProblemInstance<'a> {
     pub fn merge(&mut self, u: usize, v: usize) {
         assert!(self.g.is_present(u));
         assert!(self.g.is_present(v));
-        assert!(self.g.get(u, v) > Weight::ZERO);
+        if self.g.get(u, v) < Weight::ZERO {
+            log::warn!("merge uv: {}", self.g.get(u, v));
+        }
+        assert!(self.g.get(u, v) >= Weight::ZERO);
 
         let _start_k = self.k;
         let _start_edit_len = self.edits.len();

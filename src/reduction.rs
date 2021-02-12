@@ -54,28 +54,9 @@ pub fn full_param_independent_reduction(p: &mut ProblemInstance) {
     while applied_any_rule && p.k > 0.0 && p.g.present_node_count() > 1 {
         applied_any_rule = false;
 
-        // Rule 1 (heavy non-edge rule)
-        while rule1(p) {
-            applied_any_rule = true;
-        }
-
-        // Rule 2 (heavy edge rule, single end)
-        while rule2(p) {
-            applied_any_rule = true;
-        }
-
-        if applied_any_rule {
-            continue;
-        }
-
-        // Rule 3 (heavy edge rule, both ends)
-        while rule3(p) {
-            applied_any_rule = true;
-        }
-
-        if applied_any_rule {
-            continue;
-        }
+        // Don't repeatedly apply rules123 by themselves, one call will do all possible
+        // applications.
+        rules123(p);
 
         // Rule 4
         while rule4(p) {
@@ -113,33 +94,7 @@ pub fn fast_param_independent_reduction(p: &mut ProblemInstance) {
         p.edits
     );
 
-    let mut applied_any_rule = true;
-    while applied_any_rule && p.k > 0.0 && p.g.present_node_count() > 1 {
-        applied_any_rule = false;
-
-        // Rule 1 (heavy non-edge rule)
-        while rule1(p) {
-            applied_any_rule = true;
-        }
-
-        if applied_any_rule {
-            continue;
-        }
-
-        // Rule 2 (heavy edge rule, single end)
-        while rule2(p) {
-            applied_any_rule = true;
-        }
-
-        if applied_any_rule {
-            continue;
-        }
-
-        // Rule 3 (heavy edge rule, both ends)
-        while rule3(p) {
-            applied_any_rule = true;
-        }
-    }
+    rules123(p);
 
     dbg_trace_indent!(
         p,
@@ -150,13 +105,40 @@ pub fn fast_param_independent_reduction(p: &mut ProblemInstance) {
     );
 }
 
-pub fn rule1(p: &mut ProblemInstance) -> bool {
+pub fn rules123(p: &mut ProblemInstance) -> bool {
     let g = &mut p.g;
-    let mut applied = false;
+    let mut r1 = vec![Weight::ZERO; g.size() * g.size()];
+    let mut r2 = vec![Weight::ZERO; g.size() * g.size()];
+    let mut r3 = vec![Weight::ZERO; g.size() * (g.size() - 1) / 2];
+
+    fn r3idx(u: usize, v: usize) -> usize {
+        let row_offset = v * (v - 1) / 2;
+        row_offset + u
+    }
+
+    let mut edges_to_forbid = HashSet::new();
+    let mut edges_to_merge2 = HashSet::new();
+    let mut edges_to_merge3 = HashSet::new();
+
     for u in 0..g.size() {
         continue_if_not_present!(g, u);
 
-        let sum = g.neighbors_with_weights(u).map(|(_, weight)| weight).sum();
+        let r1sum = g
+            .neighbors_with_weights(u)
+            .map(|(_, weight)| weight)
+            .sum::<Weight>();
+        let r2total_sum = g
+            .nodes()
+            .filter_map(|w| {
+                if u == w {
+                    None
+                } else {
+                    Some(g.get(u, w).abs())
+                }
+            })
+            .sum::<Weight>();
+
+        let r3sum_u = g.neighbors_with_weights(u).map(|(_, w)| w).sum::<Weight>();
 
         for v in 0..g.size() {
             if u == v {
@@ -165,101 +147,449 @@ pub fn rule1(p: &mut ProblemInstance) -> bool {
             continue_if_not_present!(g, v);
 
             let uv = g.get(u, v);
-            if uv >= Weight::ONE || !uv.is_finite() {
-                continue;
+
+            if v > u {
+                // Rule 3 is symmetric, so only do it for one ordering.
+
+                let r3sum =
+                    r3sum_u - uv + g.neighbors_with_weights(v).map(|(_, w)| w).sum::<Weight>() - uv;
+                let r3val = uv - r3sum;
+                r3[r3idx(u, v)] = r3val;
+                if uv > Weight::ZERO && r3val >= Weight::ZERO {
+                    edges_to_merge3.insert((u, v));
+                }
+            }
+            // The other two aren't symmetric, so do them for all ordered pairs.
+
+            if uv == Weight::NEG_INFINITY {
+                r1[u * g.size() + v] = Weight::NEG_INFINITY;
+            } else {
+                let r1val = -uv - r1sum;
+                r1[u * g.size() + v] = r1val;
+                if uv < Weight::ZERO && r1val >= Weight::ZERO && uv.is_finite() {
+                    edges_to_forbid.insert((u, v));
+                }
             }
 
-            if -uv >= sum {
-                p.path_log.push_str(&format!(
-                    "rule1, forbidding {:?}-{:?}\n",
-                    p.imap[u], p.imap[v]
-                ));
-                dbg_trace_indent!(p, p.k, "rule1, forbidding {:?}-{:?}", p.imap[u], p.imap[v]);
+            let r2val = if r2total_sum == Weight::INFINITY {
+                Weight::NEG_INFINITY
+            } else {
+                uv - (r2total_sum - uv.abs())
+            };
+            r2[u * g.size() + v] = r2val;
 
-                g.set(u, v, InfiniteNum::NEG_INFINITY);
-                applied = true;
+            if uv > Weight::ZERO && r2val >= Weight::ZERO {
+                edges_to_merge2.insert((u, v));
             }
         }
     }
-    applied
-}
 
-pub fn rule2(p: &mut ProblemInstance) -> bool {
-    let mut applied = false;
-    for u in 0..p.g.size() {
-        continue_if_not_present!(p.g, u);
+    let mut any_applied = false;
+    // Repeatedly apply one reduction, and update the relevant fields, until no further application
+    // is possible.
+    // TODO: Play around with order here. (always do all forbids first? always do all merges first?
+    // alternate?)
+    let mut applied = true;
+    while applied && p.k >= 0.0 {
+        applied = false;
 
-        let total_sum =
-            p.g.nodes()
-                .filter_map(|w| {
-                    if u == w {
-                        None
-                    } else {
-                        Some(p.g.get(u, w).abs())
+        // First, a couple little helpers for actually performing the updates once they've been computed.
+        fn r1_update(
+            p: &ProblemInstance,
+            r1: &mut [Weight],
+            u: usize,
+            v: usize,
+            diff: Weight,
+            edge_set: &mut HashSet<(usize, usize)>,
+        ) {
+            let idx = u * p.g.size() + v;
+            let prev = r1[idx];
+            let new = prev + diff;
+            r1[idx] = new;
+
+            debug_assert!(
+                new != Weight::INFINITY && diff != Weight::INFINITY,
+                "Calculated new for {}-{} as {}, with diff {} and prev {}",
+                u,
+                v,
+                new,
+                diff,
+                prev
+            );
+
+            let uv = p.g.get(u, v);
+
+            if new >= Weight::ZERO && prev < Weight::ZERO && uv < Weight::ZERO {
+                edge_set.insert((u, v));
+            } else if (new < Weight::ZERO || uv >= Weight::ZERO) && prev >= Weight::ZERO {
+                edge_set.remove(&(u, v));
+            }
+        }
+        fn r2_update(
+            p: &ProblemInstance,
+            r2: &mut [Weight],
+            u: usize,
+            v: usize,
+            diff: Weight,
+            edge_set: &mut HashSet<(usize, usize)>,
+        ) {
+            let idx = u * p.g.size() + v;
+            let prev = r2[idx];
+            let new = prev + diff;
+            r2[idx] = new;
+
+            debug_assert!(
+                new != Weight::INFINITY && diff != Weight::INFINITY && !new.is_nan(),
+                "Calculated new for {}-{} as {}, with diff {} and prev {}",
+                u,
+                v,
+                new,
+                diff,
+                prev
+            );
+
+            let uv = p.g.get(u, v);
+            if new >= Weight::ZERO && prev < Weight::ZERO && uv > Weight::ZERO {
+                edge_set.insert((u, v));
+            } else if (new < Weight::ZERO || uv <= Weight::ZERO) && prev >= Weight::ZERO {
+                edge_set.remove(&(u, v));
+            }
+        }
+        fn r3_update(
+            p: &ProblemInstance,
+            r3: &mut [Weight],
+            u: usize,
+            v: usize,
+            diff: Weight,
+            edge_set: &mut HashSet<(usize, usize)>,
+        ) {
+            let idx = r3idx(u.min(v), u.max(v));
+            let prev = r3[idx];
+
+            let new = prev + diff;
+            r3[idx] = new;
+
+            debug_assert!(
+                new != Weight::INFINITY && diff != Weight::INFINITY,
+                "Calculated new for {}-{} as {}, with diff {} and prev {}",
+                u,
+                v,
+                new,
+                diff,
+                prev
+            );
+
+            let uv = p.g.get(u, v);
+            if new >= Weight::ZERO && prev < Weight::ZERO {
+                edge_set.insert((u.min(v), u.max(v)));
+            } else if (new < Weight::ZERO || uv <= Weight::ZERO) && prev >= Weight::ZERO {
+                edge_set.remove(&(u.min(v), u.max(v)));
+            }
+        }
+
+        if let Some(&(u, v)) = edges_to_forbid.iter().next() {
+            edges_to_forbid.remove(&(u, v));
+
+            p.path_log.push_str(&format!(
+                "rule1, forbidding {:?}-{:?}\n",
+                p.imap[u], p.imap[v]
+            ));
+            dbg_trace_indent!(p, p.k, "rule1, forbidding {:?}-{:?}", p.imap[u], p.imap[v]);
+
+            debug_assert!(r1[u * p.g.size() + v] >= Weight::ZERO);
+            debug_assert!(p.g.get(u, v) < Weight::ZERO);
+
+            p.g.set(u, v, InfiniteNum::NEG_INFINITY);
+            any_applied = true;
+            applied = true;
+
+            // Update other entries:
+            // No effect on other r1 values, except:
+            // Since r1 is asymmetric, u-v and v-u might both be in the list. Remove v-u if it is.
+            edges_to_forbid.remove(&(v, u));
+
+            // r2(u-v) and r2(v-u) both now neg-inf.
+            r2[u * p.g.size() + v] = Weight::NEG_INFINITY;
+            edges_to_merge2.remove(&(u, v));
+            r2[v * p.g.size() + u] = Weight::NEG_INFINITY;
+            edges_to_merge2.remove(&(v, u));
+            // In addition, for all x in V: r2(u-x) and r2(v-x) now neg-inf.
+            for x in p.g.nodes() {
+                r2[u * p.g.size() + x] = Weight::NEG_INFINITY;
+                edges_to_merge2.remove(&(u, x));
+                r2[v * p.g.size() + x] = Weight::NEG_INFINITY;
+                edges_to_merge2.remove(&(v, x));
+
+                if x == u || x == v {
+                    continue;
+                }
+                // For r3, the sums only contain existing edges, but we only forbid
+                // already-not-existing edges, so they are not affected. However, for all x, r3(u-x)
+                // and r3(v-x) also include s(ux) and s(vx) directly, so those change.
+                r3_update(p, &mut r3, u, x, Weight::NEG_INFINITY, &mut edges_to_merge3);
+                r3_update(p, &mut r3, v, x, Weight::NEG_INFINITY, &mut edges_to_merge3);
+            }
+        }
+
+        // This was the easy part, now comes the update for merging.
+
+        if let Some(&(u, v)) = edges_to_merge2.iter().chain(edges_to_merge3.iter()).next() {
+            edges_to_merge2.remove(&(u, v));
+            edges_to_merge3.remove(&(u.min(v), u.max(v)));
+
+            p.path_log
+                .push_str(&format!("rule2/3, merge {:?}-{:?}\n", p.imap[u], p.imap[v]));
+            dbg_trace_indent!(p, p.k, "rule2/3 merge {:?}-{:?}", p.imap[u], p.imap[v]);
+
+            debug_assert!(
+                r2[u * p.g.size() + v] >= Weight::ZERO
+                    || r3[r3idx(u.min(v), u.max(v))] >= Weight::ZERO
+            );
+            debug_assert!(p.g.get(u, v) > Weight::ZERO);
+
+            // We'll need the previous neighbors of both u and v for the update.
+            let u_neighbors = p.g.neighbors_with_weights(u).collect::<Vec<_>>();
+            let v_neighbors = p.g.neighbors_with_weights(v).collect::<Vec<_>>();
+
+            let uv = p.g.get(u, v);
+
+            // For r2(x-y), the computation involves every single pair x-w, for all w != x.
+            // Thus merging u-v will have an impact on literally all r2 values :(
+            // (2.1) First, for every r2(x-y), the pairing x-v disappears from the sum.
+            //
+            // (2.2) For r2(u-y), for all y, the first term may have changed. Add (uy_new - uy_old)
+            // to the value.
+            // (2.3) For r2(y-u), for all y, the first term may have changed. Add (uy_new - uy_old)
+            // to the value.
+            // (2.4) For r2(x-y), x != u && y != u, the sum may have changed. Add (xu_new.abs() - xu_old.abs())
+            // to the sum (subtract it from the value).
+            //
+            // Unlike r1 (see below) none of these operations require knowledge of both the the
+            // result of the merge and previous values simultaneously, so we do the first half now,
+            // and the second half after the merge.
+            for x in p.g.nodes() {
+                if x == v {
+                    continue;
+                }
+
+                let xv_abs = p.g.get(x, v).abs();
+                for y in p.g.nodes() {
+                    if y == x || y == v {
+                        continue;
                     }
-                })
-                .sum::<Weight>();
 
-        for v in 0..p.g.size() {
-            if u == v {
-                continue;
+                    // 2.1
+                    if xv_abs.is_finite() {
+                        // If x-v was -Infinity, we can't just add Infinity back in to counteract
+                        // its effect on the sum obviously.
+                        // To get an accurate r2 for this moment in time, we'd really have to
+                        // recalculate it entirely, but we can cheat a little:
+                        // If a node had a -Inf weight to v, after the merge it must have a -Inf
+                        // weight to u, so the sum keeps being Infinity anyway, no matter what else
+                        // we may try doing to it. We thus simply skip the update.
+                        r2_update(p, &mut r2, x, y, xv_abs, &mut edges_to_merge2);
+                    }
+
+                    if x != u && y != u {
+                        // 2.4 (add xu_old.abs())
+                        let xu_abs = p.g.get(x, u).abs();
+                        if xu_abs.is_finite() {
+                            // Essentially the same justification as above holds here too.
+                            r2_update(p, &mut r2, x, y, xu_abs, &mut edges_to_merge2);
+                        }
+                    }
+                }
+
+                if x != u {
+                    let ux = p.g.get(x, u);
+
+                    if ux.is_finite() {
+                        // Pretty much the same infinity-related justification as above once more.
+
+                        // 2.2 (u-y is named u-x here), subtract uy_old.
+                        r2_update(p, &mut r2, u, x, -ux, &mut edges_to_merge2);
+                        // 2.3. (y-u is named x-u here), subtract uy_old.
+                        r2_update(p, &mut r2, x, u, -ux, &mut edges_to_merge2);
+                    }
+                }
             }
-            continue_if_not_present!(p.g, v);
 
-            let uv = p.g.get(u, v);
-            if uv <= Weight::ZERO {
-                continue;
+            // And then r3. Note this is symmetric, unlike the others.
+            // We again split handling of this, like for r2, to avoid having to store neighbor sets
+            // for all nodes.
+            // For r3(u-x), for all x, the first term will have changed. Also, v disappeared from
+            // u's neighbors, so the first sum changed. If v was a neighbor of x too, the second
+            // sum changed too.
+            // =>
+            // (3.1) Before merging, for r3(u-x) for all x != v:
+            //  r3 -= x-u ; r3 += u-v ; if x-v > 0: r3 -= x-v
+            // (3.2) Then, after merging:
+            //  r3 += x-u
+            // For r3(x-y), x != u && y != u, the first term is unchanged. The sums changed if the
+            // respective node (x or y) has u or v as a neighbor.
+            // =>
+            // (3.3) Before merging, for r3(x-y), x != u && x != v && y != u && y != v:
+            //  if x-u > 0: r3 += x-u ; if y-u > 0: r3 += y-u ; if x-v > 0: r3 += x-v; if y-v > 0: r3 += y-v
+            // (3.4) Then, after merging:
+            //  if x-u > 0: r3 -= x-u ; if y-u > 0: r3 -= y-u
+            for x in p.g.nodes() {
+                if x == u || x == v {
+                    continue;
+                }
+
+                // (3.1)
+                let ux = p.g.get(u, x);
+                let vx = p.g.get(v, x);
+                let mut diff = Weight::ZERO;
+                if ux.is_finite() {
+                    // Same infinity-related justification for ignoring this if ux is -Inf as above
+                    // for r2.
+                    diff -= ux;
+                }
+                diff += uv;
+                if vx > Weight::ZERO {
+                    diff -= vx;
+                }
+
+                r3_update(p, &mut r3, u, x, diff, &mut edges_to_merge3);
+
+                // (3.3)
+                for y in (x + 1)..p.g.size() {
+                    if y == u || y == v {
+                        continue;
+                    }
+                    continue_if_not_present!(p.g, y);
+
+                    let uy = p.g.get(u, y);
+                    let vy = p.g.get(v, y);
+
+                    let mut diff = Weight::ZERO;
+                    diff += ux.max(Weight::ZERO);
+                    diff += uy.max(Weight::ZERO);
+                    diff += vx.max(Weight::ZERO);
+                    diff += vy.max(Weight::ZERO);
+                    r3_update(p, &mut r3, x, y, diff, &mut edges_to_merge3);
+                }
             }
 
-            let sum = total_sum - uv;
+            p.merge(u, v);
+            any_applied = true;
+            applied = true;
 
-            if uv >= sum {
-                dbg_trace_indent!(p, p.k, "rule2 merge {:?}-{:?}", p.imap[u], p.imap[v]);
-                p.path_log
-                    .push_str(&format!("rule2, merge {:?}-{:?}\n", p.imap[u], p.imap[v]));
+            // Since v is now gone, all entries involving it are void.
+            edges_to_forbid.retain(|&(x, y)| x != v && y != v);
+            edges_to_merge2.retain(|&(x, y)| x != v && y != v);
+            edges_to_merge3.retain(|&(x, y)| x != v && y != v);
 
-                p.merge(u, v);
-                applied = true;
+            let u_new_neighbors = p.g.neighbors_with_weights(u).collect::<Vec<_>>();
+
+            // For all x that were neighbors of u or v, or are *now* a neighbor of u, r1 may have
+            // changed to any other node.
+            // For r1(x-y), if x is or was neighbor of u or v, the sum will have changed:
+
+            // Everything that was a neighbor of v now isn't anymore, so the previous weight to
+            // v disappears from the sum.
+            for &(x, xv) in v_neighbors.iter() {
+                for y in p.g.nodes() {
+                    if x == y {
+                        continue;
+                    }
+                    r1_update(p, &mut r1, x, y, xv, &mut edges_to_forbid);
+                }
+            }
+
+            // TODO: Is it worth making these sets instead for the set intersection/difference?
+            // Actually, perhaps even better, this could probably be split in pre-/post-merging,
+            // like the other two?
+            for &(x, xu_old) in u_neighbors.iter() {
+                if x == v {
+                    continue;
+                }
+                if let Some(&(_, xu_new)) = u_new_neighbors.iter().find(|&&(t, _)| t == x) {
+                    // For x in old_n ∩ new_n: u was and still is part of the sum, add (new_weight -
+                    // old_weight) to the sum (subtract it from the value).
+                    for y in p.g.nodes() {
+                        if x == y {
+                            continue;
+                        }
+                        r1_update(p, &mut r1, x, y, -(xu_new - xu_old), &mut edges_to_forbid);
+                    }
+                } else {
+                    // For x in old_n - new_n: u dropped out of the sum entirely, subtract the old weight
+                    // from the sum (add it to the value).
+                    for y in p.g.nodes() {
+                        if x == y {
+                            continue;
+                        }
+                        r1_update(p, &mut r1, x, y, xu_old, &mut edges_to_forbid);
+                    }
+                }
+            }
+            for &(x, xu_new) in u_new_neighbors.iter() {
+                if let None = u_neighbors.iter().find(|&&(t, _)| t == x) {
+                    // For x in new_n - old_n: u entered the sum as a new vertex, add the new weight to the
+                    // sum (subtract it from the value).
+                    for y in p.g.nodes() {
+                        if x == y {
+                            continue;
+                        }
+                        r1_update(p, &mut r1, x, y, -xu_new, &mut edges_to_forbid);
+                    }
+                }
+            }
+
+            // Second half of the r2 update.
+            for x in p.g.nodes() {
+                if x == u {
+                    continue;
+                }
+
+                let ux = p.g.get(x, u);
+                let ux_abs = ux.abs();
+
+                for y in p.g.nodes() {
+                    if y == x || y == u {
+                        continue;
+                    }
+                    // 2.4, subtract xu_new.abs()
+                    r2_update(p, &mut r2, x, y, -ux_abs, &mut edges_to_merge2);
+                }
+
+                // 2.2 (u-y is named u-x here), add uy_new.
+                r2_update(p, &mut r2, u, x, ux, &mut edges_to_merge2);
+                // 2.3. (y-u is named x-u here), add uy_new.
+                r2_update(p, &mut r2, x, u, ux, &mut edges_to_merge2);
+            }
+
+            // Second half of the r3 update.
+            for x in p.g.nodes() {
+                if x == u {
+                    continue;
+                }
+
+                // (3.2)
+                let ux = p.g.get(u, x);
+                r3_update(p, &mut r3, u, x, ux, &mut edges_to_merge3);
+
+                // (3.3)
+                for y in (x + 1)..p.g.size() {
+                    if y == u {
+                        continue;
+                    }
+                    continue_if_not_present!(p.g, y);
+
+                    let uy = p.g.get(u, y);
+
+                    let mut diff = Weight::ZERO;
+                    diff -= ux.max(Weight::ZERO);
+                    diff -= uy.max(Weight::ZERO);
+                    r3_update(p, &mut r3, x, y, diff, &mut edges_to_merge3);
+                }
             }
         }
     }
-    applied
-}
 
-pub fn rule3(p: &mut ProblemInstance) -> bool {
-    let mut applied = false;
-    for u in 0..p.g.size() {
-        continue_if_not_present!(p.g, u);
-        // This rule is already "symmetric" so we only go through pairs in one order, not
-        // either order.
-        for v in (u + 1)..p.g.size() {
-            continue_if_not_present!(p.g, v);
-
-            let uv = p.g.get(u, v);
-            if uv <= Weight::ZERO {
-                continue;
-            }
-
-            let sum =
-                p.g.neighbors(u)
-                    .map(|w| if w == v { Weight::ZERO } else { p.g.get(u, w) })
-                    .sum::<Weight>()
-                    + p.g
-                        .neighbors(v)
-                        .map(|w| if w == u { Weight::ZERO } else { p.g.get(v, w) })
-                        .sum::<Weight>();
-
-            if uv >= sum {
-                dbg_trace_indent!(p, p.k, "rule3 merge {:?}-{:?}", p.imap[u], p.imap[v]);
-                p.path_log
-                    .push_str(&format!("rule3, merge {:?}-{:?}\n", p.imap[u], p.imap[v]));
-
-                p.merge(u, v);
-                applied = true;
-            }
-        }
-    }
-    applied
+    any_applied
 }
 
 pub fn rule4(p: &mut ProblemInstance) -> bool {
