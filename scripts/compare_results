@@ -23,7 +23,7 @@ if test "$instance_diff_status" != 0
 
 	set instances (comm -12 (echo "$instances1" | tr " " "\n" | psub) (echo "$instances2" | tr " " "\n" | psub))
 else
-	set instances "$instances1"
+	set instances (echo "$instances1" | tr " " "\n")
 end
 
 echo "Comparing results for $instances"
@@ -37,6 +37,7 @@ for instance in $instances
 	set d_status $status
 
 	if test "$d_status" != 0
-		echo "Diff for $instance: $d"
+		echo "Diff for $instance:"
+		diff (echo $res1 | tr "|" "\n" | psub) (echo $res2 | tr "|" "\n" | psub)
 	end
 end
