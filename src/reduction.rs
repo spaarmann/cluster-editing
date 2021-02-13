@@ -38,9 +38,6 @@ pub fn initial_param_independent_reduction(p: &mut ProblemInstance) -> f32 {
 /// Can be applied during the search as well, can modify `k` appropriately and don't require any
 /// specific form of the input.
 pub fn full_param_independent_reduction(p: &mut ProblemInstance) {
-    // TODO: Optimize at least rules 1-3 ! This is a super naive implementation, even the paper directly
-    // describes a better strategy for doing it.
-
     let _k_start = p.k;
     dbg_trace_indent!(
         p,
@@ -367,53 +364,7 @@ pub fn rules123(p: &mut ProblemInstance) -> bool {
             // Unlike r1 (see below) none of these operations require knowledge of both the the
             // result of the merge and previous values simultaneously, so we do the first half now,
             // and the second half after the merge.
-            for x in p.g.nodes() {
-                if x == v {
-                    continue;
-                }
-
-                let xv_abs = p.g.get(x, v).abs();
-                for y in p.g.nodes() {
-                    if y == x || y == v {
-                        continue;
-                    }
-
-                    // 2.1
-                    if xv_abs.is_finite() {
-                        // If x-v was -Infinity, we can't just add Infinity back in to counteract
-                        // its effect on the sum obviously.
-                        // To get an accurate r2 for this moment in time, we'd really have to
-                        // recalculate it entirely, but we can cheat a little:
-                        // If a node had a -Inf weight to v, after the merge it must have a -Inf
-                        // weight to u, so the sum keeps being Infinity anyway, no matter what else
-                        // we may try doing to it. We thus simply skip the update.
-                        r2_update(p, &mut r2, x, y, xv_abs, &mut edges_to_merge2);
-                    }
-
-                    if x != u && y != u {
-                        // 2.4 (add xu_old.abs())
-                        let xu_abs = p.g.get(x, u).abs();
-                        if xu_abs.is_finite() {
-                            // Essentially the same justification as above holds here too.
-                            r2_update(p, &mut r2, x, y, xu_abs, &mut edges_to_merge2);
-                        }
-                    }
-                }
-
-                if x != u {
-                    let ux = p.g.get(x, u);
-
-                    if ux.is_finite() {
-                        // Pretty much the same infinity-related justification as above once more.
-
-                        // 2.2 (u-y is named u-x here), subtract uy_old.
-                        r2_update(p, &mut r2, u, x, -ux, &mut edges_to_merge2);
-                        // 2.3. (y-u is named x-u here), subtract uy_old.
-                        r2_update(p, &mut r2, x, u, -ux, &mut edges_to_merge2);
-                    }
-                }
-            }
-
+            //
             // And then r3. Note this is symmetric, unlike the others.
             // We again split handling of this, like for r2, to avoid having to store neighbor sets
             // for all nodes.
@@ -433,13 +384,72 @@ pub fn rules123(p: &mut ProblemInstance) -> bool {
             // (3.4) Then, after merging:
             //  if x-u > 0: r3 -= x-u ; if y-u > 0: r3 -= y-u
             for x in p.g.nodes() {
-                if x == u || x == v {
+                if x == v {
                     continue;
                 }
 
-                // (3.1)
-                let ux = p.g.get(u, x);
                 let vx = p.g.get(v, x);
+                let vx_abs = vx.abs();
+
+                for y in p.g.nodes() {
+                    if y == x || y == v {
+                        continue;
+                    }
+
+                    // 2.1
+                    if vx_abs.is_finite() {
+                        // If x-v was -Infinity, we can't just add Infinity back in to counteract
+                        // its effect on the sum obviously.
+                        // To get an accurate r2 for this moment in time, we'd really have to
+                        // recalculate it entirely, but we can cheat a little:
+                        // If a node had a -Inf weight to v, after the merge it must have a -Inf
+                        // weight to u, so the sum keeps being Infinity anyway, no matter what else
+                        // we may try doing to it. We thus simply skip the update.
+                        r2_update(p, &mut r2, x, y, vx_abs, &mut edges_to_merge2);
+                    }
+
+                    if y == u || x == u {
+                        continue;
+                    }
+
+                    // 2.4 (add xu_old.abs())
+                    let ux = p.g.get(x, u);
+                    let ux_abs = ux.abs();
+                    if ux_abs.is_finite() {
+                        // Essentially the same justification as above holds here too.
+                        r2_update(p, &mut r2, x, y, ux_abs, &mut edges_to_merge2);
+                    }
+
+                    // r3 only needs the pair in one direction.
+                    if y > x {
+                        // (3.3)
+                        let uy = p.g.get(u, y);
+                        let vy = p.g.get(v, y);
+
+                        let mut diff = Weight::ZERO;
+                        diff += ux.max(Weight::ZERO);
+                        diff += uy.max(Weight::ZERO);
+                        diff += vx.max(Weight::ZERO);
+                        diff += vy.max(Weight::ZERO);
+                        r3_update(p, &mut r3, x, y, diff, &mut edges_to_merge3);
+                    }
+                }
+
+                if x == u {
+                    continue;
+                }
+
+                let ux = p.g.get(x, u);
+                if ux.is_finite() {
+                    // Pretty much the same infinity-related justification as above once more.
+
+                    // 2.2 (u-y is named u-x here), subtract uy_old.
+                    r2_update(p, &mut r2, u, x, -ux, &mut edges_to_merge2);
+                    // 2.3. (y-u is named x-u here), subtract uy_old.
+                    r2_update(p, &mut r2, x, u, -ux, &mut edges_to_merge2);
+                }
+
+                // (3.1)
                 let mut diff = Weight::ZERO;
                 if ux.is_finite() {
                     // Same infinity-related justification for ignoring this if ux is -Inf as above
@@ -452,24 +462,6 @@ pub fn rules123(p: &mut ProblemInstance) -> bool {
                 }
 
                 r3_update(p, &mut r3, u, x, diff, &mut edges_to_merge3);
-
-                // (3.3)
-                for y in (x + 1)..p.g.size() {
-                    if y == u || y == v {
-                        continue;
-                    }
-                    continue_if_not_present!(p.g, y);
-
-                    let uy = p.g.get(u, y);
-                    let vy = p.g.get(v, y);
-
-                    let mut diff = Weight::ZERO;
-                    diff += ux.max(Weight::ZERO);
-                    diff += uy.max(Weight::ZERO);
-                    diff += vx.max(Weight::ZERO);
-                    diff += vy.max(Weight::ZERO);
-                    r3_update(p, &mut r3, x, y, diff, &mut edges_to_merge3);
-                }
             }
 
             p.merge(u, v);
@@ -538,7 +530,7 @@ pub fn rules123(p: &mut ProblemInstance) -> bool {
                 }
             }
 
-            // Second half of the r2 update.
+            // Second half of the r2 and r3 updates.
             for x in p.g.nodes() {
                 if x == u {
                     continue;
@@ -547,43 +539,31 @@ pub fn rules123(p: &mut ProblemInstance) -> bool {
                 let ux = p.g.get(x, u);
                 let ux_abs = ux.abs();
 
+                // 2.2 (u-y is named u-x here), add uy_new.
+                r2_update(p, &mut r2, u, x, ux, &mut edges_to_merge2);
+                // 2.3. (y-u is named x-u here), add uy_new.
+                r2_update(p, &mut r2, x, u, ux, &mut edges_to_merge2);
+
+                // (3.2)
+                let ux = p.g.get(u, x);
+                r3_update(p, &mut r3, u, x, ux, &mut edges_to_merge3);
+
                 for y in p.g.nodes() {
                     if y == x || y == u {
                         continue;
                     }
                     // 2.4, subtract xu_new.abs()
                     r2_update(p, &mut r2, x, y, -ux_abs, &mut edges_to_merge2);
-                }
 
-                // 2.2 (u-y is named u-x here), add uy_new.
-                r2_update(p, &mut r2, u, x, ux, &mut edges_to_merge2);
-                // 2.3. (y-u is named x-u here), add uy_new.
-                r2_update(p, &mut r2, x, u, ux, &mut edges_to_merge2);
-            }
+                    if y > x {
+                        // (3.3)
+                        let uy = p.g.get(u, y);
 
-            // Second half of the r3 update.
-            for x in p.g.nodes() {
-                if x == u {
-                    continue;
-                }
-
-                // (3.2)
-                let ux = p.g.get(u, x);
-                r3_update(p, &mut r3, u, x, ux, &mut edges_to_merge3);
-
-                // (3.3)
-                for y in (x + 1)..p.g.size() {
-                    if y == u {
-                        continue;
+                        let mut diff = Weight::ZERO;
+                        diff -= ux.max(Weight::ZERO);
+                        diff -= uy.max(Weight::ZERO);
+                        r3_update(p, &mut r3, x, y, diff, &mut edges_to_merge3);
                     }
-                    continue_if_not_present!(p.g, y);
-
-                    let uy = p.g.get(u, y);
-
-                    let mut diff = Weight::ZERO;
-                    diff -= ux.max(Weight::ZERO);
-                    diff -= uy.max(Weight::ZERO);
-                    r3_update(p, &mut r3, x, y, diff, &mut edges_to_merge3);
                 }
             }
         }
