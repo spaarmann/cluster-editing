@@ -1,0 +1,42 @@
+#!/usr/bin/env fish
+
+# Parse command line args
+set argc (count $argv)
+if test "$argc" != 2
+	echo "Usage: compare_results <run1> <run2>"
+	exit 1
+else
+	set run1 "$argv[1]"
+	set run2 "$argv[2]"
+end
+
+echo "Comparing results of runs $run1 and $run2"
+
+set instances1 (ls "$run1/runner_out/" | grep ".out" | sed -r 's/.*\/(exact.*)/\1/g')
+set instances2 (ls "$run2/runner_out/" | grep ".out" | sed -r 's/.*\/(exact.*)/\1/g')
+
+set instance_diff (diff (echo "$instances1" | tr " " "\n" | psub) (echo "$instances2" | tr " " "\n" | psub))
+set instance_diff_status $status
+
+if test "$instance_diff_status" != 0
+	echo "Different instance sets: $instance_diff"
+
+	set instances (comm -12 (echo "$instances1" | tr " " "\n" | psub) (echo "$instances2" | tr " " "\n" | psub))
+else
+	set instances "$instances1"
+end
+
+echo "Comparing results for $instances"
+
+for instance in $instances
+	# [2021-02-12T13:00:17Z INFO  cluster_editing::algo] Final set of 81 de-duplicated edits: [Insert(2, 0), Delete(9, 3)...
+	set res1 (grep "Final set of " "$run1/runner_out/$instance" | sed -r 's/.*Final set of [0-9]+ de-duplicated edits: (.*)/\1/g' | sed -r 's/\), /\)|/g')
+	set res2 (grep "Final set of " "$run2/runner_out/$instance" | sed -r 's/.*Final set of [0-9]+ de-duplicated edits: (.*)/\1/g' | sed -r 's/\), /\)|/g')
+
+	set d (diff (echo $res1 | tr "|" "\n" | psub) (echo $res2 | tr "|" "\n" | psub))
+	set d_status $status
+
+	if test "$d_status" != 0
+		echo "Diff for $instance: $d"
+	end
+end

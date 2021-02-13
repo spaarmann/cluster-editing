@@ -48,7 +48,7 @@ echo "Took $total_time seconds."
 echo "Took $total_time seconds." >> "$out_dir/summary"
 
 # Copy output to storage
-echo "Storing run reults at $out_dir"
+echo "Storing run results at $out_dir"
 cp -r runner_out "$out_dir/"
 cat "$out_dir/runner_out/summary" >> "$out_dir/summary"
 
