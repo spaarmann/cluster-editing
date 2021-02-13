@@ -4,6 +4,19 @@ use crate::{
 
 use std::collections::HashSet;
 
+#[derive(Clone, Debug, Default)]
+pub struct ReductionStorage {
+    r1: Vec<Weight>,
+    r2: Vec<Weight>,
+    r3: Vec<Weight>,
+    r123_neighbors_u: Vec<(usize, Weight)>,
+    r123_neighbors_v: Vec<(usize, Weight)>,
+    r123_neighbors_u_new: Vec<(usize, Weight)>,
+    r5_relevant_pairs: Vec<(Weight, Weight)>,
+    r5_m: Vec<Option<isize>>,
+    r5_m_prev: Vec<Option<isize>>,
+}
+
 /// The reduction assumes an unweighted graph as input (i.e. one with only weights 1 and -1).
 pub fn initial_param_independent_reduction(p: &mut ProblemInstance) -> f32 {
     // Simply merging all critical cliques leads to a graph with at most 4 * k_opt vertices.
@@ -103,10 +116,14 @@ pub fn fast_param_independent_reduction(p: &mut ProblemInstance) {
 }
 
 pub fn rules123(p: &mut ProblemInstance) -> bool {
-    let g = &mut p.g;
-    let mut r1 = vec![Weight::ZERO; g.size() * g.size()];
-    let mut r2 = vec![Weight::ZERO; g.size() * g.size()];
-    let mut r3 = vec![Weight::ZERO; g.size() * (g.size() - 1) / 2];
+    let mut r = p.r.take().unwrap();
+
+    r.r1.clear();
+    r.r1.extend(std::iter::repeat(Weight::ZERO).take(p.g.size() * p.g.size()));
+    r.r2.clear();
+    r.r2.extend(std::iter::repeat(Weight::ZERO).take(p.g.size() * p.g.size()));
+    r.r3.clear();
+    r.r3.extend(std::iter::repeat(Weight::ZERO).take(p.g.size() * (p.g.size() - 1) / 2));
 
     fn r3idx(u: usize, v: usize) -> usize {
         let row_offset = v * (v - 1) / 2;
@@ -117,41 +134,48 @@ pub fn rules123(p: &mut ProblemInstance) -> bool {
     let mut edges_to_merge2 = HashSet::new();
     let mut edges_to_merge3 = HashSet::new();
 
-    for u in 0..g.size() {
-        continue_if_not_present!(g, u);
+    for u in 0..p.g.size() {
+        continue_if_not_present!(p.g, u);
 
-        let r1sum = g
-            .neighbors_with_weights(u)
-            .map(|(_, weight)| weight)
-            .sum::<Weight>();
-        let r2total_sum = g
-            .nodes()
-            .filter_map(|w| {
-                if u == w {
-                    None
-                } else {
-                    Some(g.get(u, w).abs())
-                }
-            })
-            .sum::<Weight>();
+        let r1sum =
+            p.g.neighbors_with_weights(u)
+                .map(|(_, weight)| weight)
+                .sum::<Weight>();
+        let r2total_sum =
+            p.g.nodes()
+                .filter_map(|w| {
+                    if u == w {
+                        None
+                    } else {
+                        Some(p.g.get(u, w).abs())
+                    }
+                })
+                .sum::<Weight>();
 
-        let r3sum_u = g.neighbors_with_weights(u).map(|(_, w)| w).sum::<Weight>();
+        let r3sum_u =
+            p.g.neighbors_with_weights(u)
+                .map(|(_, w)| w)
+                .sum::<Weight>();
 
-        for v in 0..g.size() {
+        for v in 0..p.g.size() {
             if u == v {
                 continue;
             }
-            continue_if_not_present!(g, v);
+            continue_if_not_present!(p.g, v);
 
-            let uv = g.get(u, v);
+            let uv = p.g.get(u, v);
 
             if v > u {
-                // Rule 3 is symmetric, so only do it for one ordering.
+                // Rule 3 is symmetric, so only do it for one orderinp.g.
 
-                let r3sum =
-                    r3sum_u - uv + g.neighbors_with_weights(v).map(|(_, w)| w).sum::<Weight>() - uv;
+                let r3sum = r3sum_u - uv
+                    + p.g
+                        .neighbors_with_weights(v)
+                        .map(|(_, w)| w)
+                        .sum::<Weight>()
+                    - uv;
                 let r3val = uv - r3sum;
-                r3[r3idx(u, v)] = r3val;
+                r.r3[r3idx(u, v)] = r3val;
                 if uv > Weight::ZERO && r3val >= Weight::ZERO {
                     edges_to_merge3.insert((u, v));
                 }
@@ -159,10 +183,10 @@ pub fn rules123(p: &mut ProblemInstance) -> bool {
             // The other two aren't symmetric, so do them for all ordered pairs.
 
             if uv == Weight::NEG_INFINITY {
-                r1[u * g.size() + v] = Weight::NEG_INFINITY;
+                r.r1[u * p.g.size() + v] = Weight::NEG_INFINITY;
             } else {
                 let r1val = -uv - r1sum;
-                r1[u * g.size() + v] = r1val;
+                r.r1[u * p.g.size() + v] = r1val;
                 if uv < Weight::ZERO && r1val >= Weight::ZERO && uv.is_finite() {
                     edges_to_forbid.insert((u, v));
                 }
@@ -173,7 +197,7 @@ pub fn rules123(p: &mut ProblemInstance) -> bool {
             } else {
                 uv - (r2total_sum - uv.abs())
             };
-            r2[u * g.size() + v] = r2val;
+            r.r2[u * p.g.size() + v] = r2val;
 
             if uv > Weight::ZERO && r2val >= Weight::ZERO {
                 edges_to_merge2.insert((u, v));
@@ -193,16 +217,16 @@ pub fn rules123(p: &mut ProblemInstance) -> bool {
         // First, a couple little helpers for actually performing the updates once they've been computed.
         fn r1_update(
             p: &ProblemInstance,
-            r1: &mut [Weight],
+            r: &mut ReductionStorage,
             u: usize,
             v: usize,
             diff: Weight,
             edge_set: &mut HashSet<(usize, usize)>,
         ) {
             let idx = u * p.g.size() + v;
-            let prev = r1[idx];
+            let prev = r.r1[idx];
             let new = prev + diff;
-            r1[idx] = new;
+            r.r1[idx] = new;
 
             debug_assert!(
                 new != Weight::INFINITY && diff != Weight::INFINITY,
@@ -224,16 +248,16 @@ pub fn rules123(p: &mut ProblemInstance) -> bool {
         }
         fn r2_update(
             p: &ProblemInstance,
-            r2: &mut [Weight],
+            r: &mut ReductionStorage,
             u: usize,
             v: usize,
             diff: Weight,
             edge_set: &mut HashSet<(usize, usize)>,
         ) {
             let idx = u * p.g.size() + v;
-            let prev = r2[idx];
+            let prev = r.r2[idx];
             let new = prev + diff;
-            r2[idx] = new;
+            r.r2[idx] = new;
 
             debug_assert!(
                 new != Weight::INFINITY && diff != Weight::INFINITY && !new.is_nan(),
@@ -254,17 +278,17 @@ pub fn rules123(p: &mut ProblemInstance) -> bool {
         }
         fn r3_update(
             p: &ProblemInstance,
-            r3: &mut [Weight],
+            r: &mut ReductionStorage,
             u: usize,
             v: usize,
             diff: Weight,
             edge_set: &mut HashSet<(usize, usize)>,
         ) {
             let idx = r3idx(u.min(v), u.max(v));
-            let prev = r3[idx];
+            let prev = r.r3[idx];
 
             let new = prev + diff;
-            r3[idx] = new;
+            r.r3[idx] = new;
 
             debug_assert!(
                 new != Weight::INFINITY && diff != Weight::INFINITY,
@@ -293,7 +317,7 @@ pub fn rules123(p: &mut ProblemInstance) -> bool {
             ));
             dbg_trace_indent!(p, p.k, "rule1, forbidding {:?}-{:?}", p.imap[u], p.imap[v]);
 
-            debug_assert!(r1[u * p.g.size() + v] >= Weight::ZERO);
+            debug_assert!(r.r1[u * p.g.size() + v] >= Weight::ZERO);
             debug_assert!(p.g.get(u, v) < Weight::ZERO);
 
             p.g.set(u, v, InfiniteNum::NEG_INFINITY);
@@ -306,15 +330,15 @@ pub fn rules123(p: &mut ProblemInstance) -> bool {
             edges_to_forbid.remove(&(v, u));
 
             // r2(u-v) and r2(v-u) both now neg-inf.
-            r2[u * p.g.size() + v] = Weight::NEG_INFINITY;
+            r.r2[u * p.g.size() + v] = Weight::NEG_INFINITY;
             edges_to_merge2.remove(&(u, v));
-            r2[v * p.g.size() + u] = Weight::NEG_INFINITY;
+            r.r2[v * p.g.size() + u] = Weight::NEG_INFINITY;
             edges_to_merge2.remove(&(v, u));
             // In addition, for all x in V: r2(u-x) and r2(v-x) now neg-inf.
             for x in p.g.nodes() {
-                r2[u * p.g.size() + x] = Weight::NEG_INFINITY;
+                r.r2[u * p.g.size() + x] = Weight::NEG_INFINITY;
                 edges_to_merge2.remove(&(u, x));
-                r2[v * p.g.size() + x] = Weight::NEG_INFINITY;
+                r.r2[v * p.g.size() + x] = Weight::NEG_INFINITY;
                 edges_to_merge2.remove(&(v, x));
 
                 if x == u || x == v {
@@ -323,8 +347,8 @@ pub fn rules123(p: &mut ProblemInstance) -> bool {
                 // For r3, the sums only contain existing edges, but we only forbid
                 // already-not-existing edges, so they are not affected. However, for all x, r3(u-x)
                 // and r3(v-x) also include s(ux) and s(vx) directly, so those change.
-                r3_update(p, &mut r3, u, x, Weight::NEG_INFINITY, &mut edges_to_merge3);
-                r3_update(p, &mut r3, v, x, Weight::NEG_INFINITY, &mut edges_to_merge3);
+                r3_update(p, &mut r, u, x, Weight::NEG_INFINITY, &mut edges_to_merge3);
+                r3_update(p, &mut r, v, x, Weight::NEG_INFINITY, &mut edges_to_merge3);
             }
         }
 
@@ -339,8 +363,8 @@ pub fn rules123(p: &mut ProblemInstance) -> bool {
             dbg_trace_indent!(p, p.k, "rule2/3 merge {:?}-{:?}", p.imap[u], p.imap[v]);
 
             debug_assert!(
-                r2[u * p.g.size() + v] >= Weight::ZERO
-                    || r3[r3idx(u.min(v), u.max(v))] >= Weight::ZERO
+                r.r2[u * p.g.size() + v] >= Weight::ZERO
+                    || r.r3[r3idx(u.min(v), u.max(v))] >= Weight::ZERO
             );
             debug_assert!(p.g.get(u, v) > Weight::ZERO);
 
@@ -405,7 +429,7 @@ pub fn rules123(p: &mut ProblemInstance) -> bool {
                         // If a node had a -Inf weight to v, after the merge it must have a -Inf
                         // weight to u, so the sum keeps being Infinity anyway, no matter what else
                         // we may try doing to it. We thus simply skip the update.
-                        r2_update(p, &mut r2, x, y, vx_abs, &mut edges_to_merge2);
+                        r2_update(p, &mut r, x, y, vx_abs, &mut edges_to_merge2);
                     }
 
                     if y == u || x == u {
@@ -417,7 +441,7 @@ pub fn rules123(p: &mut ProblemInstance) -> bool {
                     let ux_abs = ux.abs();
                     if ux_abs.is_finite() {
                         // Essentially the same justification as above holds here too.
-                        r2_update(p, &mut r2, x, y, ux_abs, &mut edges_to_merge2);
+                        r2_update(p, &mut r, x, y, ux_abs, &mut edges_to_merge2);
                     }
 
                     // r3 only needs the pair in one direction.
@@ -431,7 +455,7 @@ pub fn rules123(p: &mut ProblemInstance) -> bool {
                         diff += uy.max(Weight::ZERO);
                         diff += vx.max(Weight::ZERO);
                         diff += vy.max(Weight::ZERO);
-                        r3_update(p, &mut r3, x, y, diff, &mut edges_to_merge3);
+                        r3_update(p, &mut r, x, y, diff, &mut edges_to_merge3);
                     }
                 }
 
@@ -444,9 +468,9 @@ pub fn rules123(p: &mut ProblemInstance) -> bool {
                     // Pretty much the same infinity-related justification as above once more.
 
                     // 2.2 (u-y is named u-x here), subtract uy_old.
-                    r2_update(p, &mut r2, u, x, -ux, &mut edges_to_merge2);
+                    r2_update(p, &mut r, u, x, -ux, &mut edges_to_merge2);
                     // 2.3. (y-u is named x-u here), subtract uy_old.
-                    r2_update(p, &mut r2, x, u, -ux, &mut edges_to_merge2);
+                    r2_update(p, &mut r, x, u, -ux, &mut edges_to_merge2);
                 }
 
                 // (3.1)
@@ -461,7 +485,7 @@ pub fn rules123(p: &mut ProblemInstance) -> bool {
                     diff -= vx;
                 }
 
-                r3_update(p, &mut r3, u, x, diff, &mut edges_to_merge3);
+                r3_update(p, &mut r, u, x, diff, &mut edges_to_merge3);
             }
 
             p.merge(u, v);
@@ -486,7 +510,7 @@ pub fn rules123(p: &mut ProblemInstance) -> bool {
                     if x == y {
                         continue;
                     }
-                    r1_update(p, &mut r1, x, y, xv, &mut edges_to_forbid);
+                    r1_update(p, &mut r, x, y, xv, &mut edges_to_forbid);
                 }
             }
 
@@ -504,7 +528,7 @@ pub fn rules123(p: &mut ProblemInstance) -> bool {
                         if x == y {
                             continue;
                         }
-                        r1_update(p, &mut r1, x, y, -(xu_new - xu_old), &mut edges_to_forbid);
+                        r1_update(p, &mut r, x, y, -(xu_new - xu_old), &mut edges_to_forbid);
                     }
                 } else {
                     // For x in old_n - new_n: u dropped out of the sum entirely, subtract the old weight
@@ -513,7 +537,7 @@ pub fn rules123(p: &mut ProblemInstance) -> bool {
                         if x == y {
                             continue;
                         }
-                        r1_update(p, &mut r1, x, y, xu_old, &mut edges_to_forbid);
+                        r1_update(p, &mut r, x, y, xu_old, &mut edges_to_forbid);
                     }
                 }
             }
@@ -525,7 +549,7 @@ pub fn rules123(p: &mut ProblemInstance) -> bool {
                         if x == y {
                             continue;
                         }
-                        r1_update(p, &mut r1, x, y, -xu_new, &mut edges_to_forbid);
+                        r1_update(p, &mut r, x, y, -xu_new, &mut edges_to_forbid);
                     }
                 }
             }
@@ -540,20 +564,20 @@ pub fn rules123(p: &mut ProblemInstance) -> bool {
                 let ux_abs = ux.abs();
 
                 // 2.2 (u-y is named u-x here), add uy_new.
-                r2_update(p, &mut r2, u, x, ux, &mut edges_to_merge2);
+                r2_update(p, &mut r, u, x, ux, &mut edges_to_merge2);
                 // 2.3. (y-u is named x-u here), add uy_new.
-                r2_update(p, &mut r2, x, u, ux, &mut edges_to_merge2);
+                r2_update(p, &mut r, x, u, ux, &mut edges_to_merge2);
 
                 // (3.2)
                 let ux = p.g.get(u, x);
-                r3_update(p, &mut r3, u, x, ux, &mut edges_to_merge3);
+                r3_update(p, &mut r, u, x, ux, &mut edges_to_merge3);
 
                 for y in p.g.nodes() {
                     if y == x || y == u {
                         continue;
                     }
                     // 2.4, subtract xu_new.abs()
-                    r2_update(p, &mut r2, x, y, -ux_abs, &mut edges_to_merge2);
+                    r2_update(p, &mut r, x, y, -ux_abs, &mut edges_to_merge2);
 
                     if y > x {
                         // (3.3)
@@ -562,13 +586,14 @@ pub fn rules123(p: &mut ProblemInstance) -> bool {
                         let mut diff = Weight::ZERO;
                         diff -= ux.max(Weight::ZERO);
                         diff -= uy.max(Weight::ZERO);
-                        r3_update(p, &mut r3, x, y, diff, &mut edges_to_merge3);
+                        r3_update(p, &mut r, x, y, diff, &mut edges_to_merge3);
                     }
                 }
             }
         }
     }
 
+    p.r = Some(r);
     any_applied
 }
 
@@ -857,6 +882,8 @@ pub fn rule5(p: &mut ProblemInstance) -> bool {
 
     let mut applied = false;
 
+    let mut r = p.r.take().unwrap();
+
     for u in 0..p.g.size() {
         continue_if_not_present!(p.g, u);
 
@@ -868,8 +895,8 @@ pub fn rule5(p: &mut ProblemInstance) -> bool {
                 continue;
             }
 
-            p.r5_relevant_pairs.clear();
-            let d = compute_initial_data(&p.g, &mut p.r5_relevant_pairs, u, v);
+            r.r5_relevant_pairs.clear();
+            let d = compute_initial_data(&p.g, &mut r.r5_relevant_pairs, u, v);
 
             if uv <= Weight::min(d.delta_u, d.delta_v) {
                 // No chance of satisfying condition
@@ -899,9 +926,9 @@ pub fn rule5(p: &mut ProblemInstance) -> bool {
                 continue;
             }
 
-            p.r5_m.clear();
-            p.r5_m_prev.clear();
-            let max = compute_max(&d, &mut p.r5_m, &mut p.r5_m_prev, uv);
+            r.r5_m.clear();
+            r.r5_m_prev.clear();
+            let max = compute_max(&d, &mut r.r5_m, &mut r.r5_m_prev, uv);
 
             if uv > max {
                 dbg_trace_indent!(
@@ -930,6 +957,7 @@ pub fn rule5(p: &mut ProblemInstance) -> bool {
         }
     }
 
+    p.r = Some(r);
     applied
 }
 

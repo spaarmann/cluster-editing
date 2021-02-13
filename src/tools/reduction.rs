@@ -51,19 +51,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                 full_reduction_interval: 6,
                 debug_opts: HashMap::new(),
             };
-            let mut instance = cluster_editing::algo::ProblemInstance {
-                params: &params,
-                g: cg,
-                imap,
-                k: f32::MAX,
-                k_max: f32::MAX,
-                full_reduction_counter: 0,
-                edits: Vec::new(),
-                path_log: String::new(),
-                r5_relevant_pairs: Vec::new(),
-                r5_m: Vec::new(),
-                r5_m_prev: Vec::new(),
-            };
+            let mut instance = cluster_editing::algo::ProblemInstance::new(&params, cg, imap);
+            instance.k = f32::MAX;
+            instance.k_max = f32::MAX;
             reduction::initial_param_independent_reduction(&mut instance);
 
             after += instance.g.present_node_count();

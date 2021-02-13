@@ -137,19 +137,7 @@ pub fn find_optimal_cluster_editing(
     );
 
     let mut _path_debugs = String::new();
-    let mut instance = ProblemInstance {
-        params,
-        g: g.clone(),
-        imap: imap.clone(),
-        k: 0.0,
-        k_max: 0.0,
-        full_reduction_counter: 0,
-        edits: Vec::new(),
-        path_log: String::new(),
-        r5_relevant_pairs: Vec::new(),
-        r5_m: Vec::new(),
-        r5_m_prev: Vec::new(),
-    };
+    let mut instance = ProblemInstance::new(params, g.clone(), imap.clone());
     let k_start = reduction::initial_param_independent_reduction(&mut instance);
 
     info!(
@@ -201,14 +189,25 @@ pub struct ProblemInstance<'a> {
     pub full_reduction_counter: i32,
     pub edits: Vec<Edit>,
     pub path_log: String,
-
     // Helpers for `reduction`, stored here to avoid allocating new ones as much.
-    pub r5_relevant_pairs: Vec<(Weight, Weight)>,
-    pub r5_m: Vec<Option<isize>>,
-    pub r5_m_prev: Vec<Option<isize>>,
+    pub r: Option<reduction::ReductionStorage>,
 }
 
 impl<'a> ProblemInstance<'a> {
+    pub fn new(params: &'a Parameters, g: Graph<Weight>, imap: IndexMap) -> Self {
+        Self {
+            params,
+            g,
+            imap,
+            k: 0.0,
+            k_max: 0.0,
+            full_reduction_counter: 0,
+            edits: Vec::new(),
+            path_log: String::new(),
+            r: Some(Default::default()),
+        }
+    }
+
     fn fork_new_branch(&self) -> Self {
         self.clone()
     }
@@ -242,17 +241,10 @@ impl<'a> ProblemInstance<'a> {
                     ));
 
                     let comp_instance = ProblemInstance {
-                        params: self.params,
+                        //params: self.params,
                         g: comp,
                         imap: comp_imap,
-                        k: self.k,
-                        k_max: self.k_max,
-                        full_reduction_counter: self.full_reduction_counter,
-                        edits: self.edits,
-                        path_log: self.path_log,
-                        r5_relevant_pairs: self.r5_relevant_pairs,
-                        r5_m: self.r5_m,
-                        r5_m_prev: self.r5_m_prev,
+                        ..self
                     };
 
                     // returns early if we can't even find a solution for the component,
@@ -262,9 +254,7 @@ impl<'a> ProblemInstance<'a> {
                             self.k = comp_instance.k;
                             self.edits = comp_instance.edits;
                             self.path_log = comp_instance.path_log;
-                            self.r5_relevant_pairs = comp_instance.r5_relevant_pairs;
-                            self.r5_m = comp_instance.r5_m;
-                            self.r5_m_prev = comp_instance.r5_m_prev;
+                            self.r = comp_instance.r;
                         }
                         None => {
                             dbg_trace_indent!(
