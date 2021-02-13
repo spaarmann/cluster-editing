@@ -19,7 +19,7 @@ if test $status -ne 0
 end
 
 set revision (git rev-parse --short HEAD)
-set start_time (date -Isecond)
+set start_time (date -Isecond | tr ":" "-")
 
 echo "Starting complete run with $num_workers threads and a timeout of $timeout minutes."
 echo "Revision: $revision, date: $start_time"
