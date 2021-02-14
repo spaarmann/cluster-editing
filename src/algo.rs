@@ -216,8 +216,9 @@ impl<'a> ProblemInstance<'a> {
     // `k` is stored as float because it needs to be compared with and changed by values from
     // the WeightMap a lot, which are floats.
     fn find_cluster_editing(mut self) -> Option<Self> {
-        // If k is already 0, we can only if we currently have a solution; there is no point in trying
+        // If k is already 0, we can only succeed if we currently have a solution; there is no point in trying
         // to do further reductions or splitting as we can't afford any edits anyway.
+        let _k_start = self.k;
 
         if self.k > 0.0 {
             let (components, component_map) = self.g.split_into_components(&self.imap);
@@ -309,28 +310,27 @@ impl<'a> ProblemInstance<'a> {
                     return None;
                 }
             }
+
+            dbg_trace_indent!(self, self.k, "Performing reduction");
+
+            if self.full_reduction_counter == 0 {
+                reduction::full_param_independent_reduction(&mut self);
+                self.full_reduction_counter = self.params.full_reduction_interval;
+            } else {
+                reduction::fast_param_independent_reduction(&mut self);
+                self.full_reduction_counter -= 1;
+            }
+
+            dbg_trace_indent!(
+                self,
+                _k_start,
+                "Reduced from k={} to k={}",
+                _k_start,
+                self.k
+            );
+            self.path_log
+                .push_str(&format!("Reduced from k={} to k={}\n", _k_start, self.k));
         }
-
-        dbg_trace_indent!(self, self.k, "Performing reduction");
-        let _k_start = self.k;
-
-        if self.full_reduction_counter == 0 {
-            reduction::full_param_independent_reduction(&mut self);
-            self.full_reduction_counter = self.params.full_reduction_interval;
-        } else {
-            reduction::fast_param_independent_reduction(&mut self);
-            self.full_reduction_counter -= 1;
-        }
-
-        dbg_trace_indent!(
-            self,
-            _k_start,
-            "Reduced from k={} to k={}",
-            _k_start,
-            self.k
-        );
-        self.path_log
-            .push_str(&format!("Reduced from k={} to k={}\n", _k_start, self.k));
 
         if self.k < 0.0 {
             return None;
