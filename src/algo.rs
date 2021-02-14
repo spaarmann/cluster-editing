@@ -221,11 +221,10 @@ impl<'a> ProblemInstance<'a> {
         let _k_start = self.k;
 
         if self.k > 0.0 {
-            let (components, component_map) = self.g.split_into_components(&self.imap);
+            /*let (components, component_map) = self.g.split_into_components(&self.imap);
             if components.len() > 1 {
                 // If a connected component decomposes into two components, we calculate
                 // the optimum solution for these components separately.
-                // TODO: Still not entirely convinced why this is actually *correct*.
 
                 let _k_start = self.k;
                 for (_i, (comp, comp_imap)) in components.into_iter().enumerate() {
@@ -309,7 +308,7 @@ impl<'a> ProblemInstance<'a> {
                 } else {
                     return None;
                 }
-            }
+            }*/
 
             dbg_trace_indent!(self, self.k, "Performing reduction");
 
@@ -457,6 +456,10 @@ impl<'a> ProblemInstance<'a> {
             }
         };
 
+        if res1.is_some() {
+            return res1;
+        }
+
         // 2. Merge uv
         let res2 = {
             let mut branched = self.fork_new_branch();
@@ -498,7 +501,8 @@ impl<'a> ProblemInstance<'a> {
             }
         };
 
-        match (res1, res2) {
+        res2
+        /*match (res1, res2) {
             (None, None) => None,
             (None, Some(r)) => Some(r),
             (Some(r), None) => Some(r),
@@ -517,7 +521,7 @@ impl<'a> ProblemInstance<'a> {
                     Some(r2)
                 }
             }
-        }
+        }*/
     }
 
     /// Merge u and v. The merged vertex becomes the new vertex at index u in the graph, while v is
