@@ -152,7 +152,7 @@ pub fn find_optimal_cluster_editing(
 
         let mut instance = instance.fork_new_branch();
         instance.k = only_k as f32;
-        if let Some(instance) = instance.find_cluster_editing() {
+        if let (true, instance) = instance.find_cluster_editing() {
             log::info!("Found solution, final path log:\n{}", instance.path_log);
             return (instance.k as i32, instance.edits);
         } else {
@@ -167,7 +167,7 @@ pub fn find_optimal_cluster_editing(
 
         let mut instance = instance.fork_new_branch();
         instance.k = k;
-        if let Some(instance) = instance.find_cluster_editing() {
+        if let (true, instance) = instance.find_cluster_editing() {
             if !instance.path_log.is_empty() {
                 log::info!("Final path debug log:\n{}", instance.path_log);
             }
@@ -215,7 +215,7 @@ impl<'a> ProblemInstance<'a> {
     /// Tries to find a solution of size <= k for this problem instance.
     // `k` is stored as float because it needs to be compared with and changed by values from
     // the WeightMap a lot, which are floats.
-    fn find_cluster_editing(mut self) -> Option<Self> {
+    fn find_cluster_editing(mut self) -> (bool, Self) {
         // If k is already 0, we can only succeed if we currently have a solution; there is no point in trying
         // to do further reductions or splitting as we can't afford any edits anyway.
         let _k_start = self.k;
@@ -332,7 +332,7 @@ impl<'a> ProblemInstance<'a> {
         }
 
         if self.k < 0.0 {
-            return None;
+            return (false, self);
         }
 
         dbg_trace_indent!(self, _k_start, "Searching triple");
@@ -396,10 +396,10 @@ impl<'a> ProblemInstance<'a> {
 
                 if self.k < 0.0 {
                     // not enough cost left over to actually realize those zero-edges.
-                    return None;
+                    return (false, self);
                 }
 
-                return Some(self);
+                return (true, self);
             }
             Some(t) => t,
         };
@@ -413,34 +413,38 @@ impl<'a> ProblemInstance<'a> {
             self.imap[_w]
         );
 
+        let edit_len = self.edits.len();
+        let oplog_len = self.g.oplog_len();
+        let path_len = self.path_log.len();
+        let prev_imap = self.imap.clone();
+        let prev_k = self.k;
+
         // Found a conflict triple, now branch into 2 cases:
         // 1. Set uv to forbidden
-        let res1 = {
-            let mut branched = self.fork_new_branch();
-            //let uv = branched.g.get_mut(u, v);
-            let uv = branched.g.get(u, v);
+        let (solution_found, mut this) = {
+            let uv = self.g.get(u, v);
             // TODO: Might not need this check after edge merging is in? Maybe?
             if uv.is_finite() {
-                branched.k = self.k - uv as f32;
+                self.k = self.k - uv as f32;
 
-                if branched.k >= 0.0 {
+                if self.k >= 0.0 {
                     dbg_trace_indent!(
                         self,
                         _k_start,
                         "Branch: Set {:?}-{:?} forbidden, k after edit: {} !",
-                        branched.imap[u],
-                        branched.imap[v],
-                        branched.k
+                        self.imap[u],
+                        self.imap[v],
+                        self.k
                     );
-                    branched.path_log.push_str(&format!(
+                    self.path_log.push_str(&format!(
                         "Branch: Set {:?}-{:?} forbidden, k after edit: {} !\n",
-                        branched.imap[u], branched.imap[v], self.k
+                        self.imap[u], self.imap[v], self.k
                     ));
 
-                    Edit::delete(&mut branched.edits, &branched.imap, u, v);
-                    branched.g.set(u, v, InfiniteNum::NEG_INFINITY);
+                    Edit::delete(&mut self.edits, &self.imap, u, v);
+                    self.g.set(u, v, InfiniteNum::NEG_INFINITY);
 
-                    branched.find_cluster_editing()
+                    self.find_cluster_editing()
                 } else {
                     dbg_trace_indent!(
                         self,
@@ -449,79 +453,63 @@ impl<'a> ProblemInstance<'a> {
                         self.imap[u],
                         self.imap[v]
                     );
-                    None
+                    (false, self)
                 }
             } else {
-                None
+                (false, self)
             }
         };
 
-        if res1.is_some() {
-            return res1;
+        if solution_found {
+            return (true, this);
         }
+
+        this.edits.truncate(edit_len);
+        this.g.rollback_to(oplog_len);
+        this.path_log.truncate(path_len);
+        this.imap = prev_imap;
+        this.k = prev_k;
 
         // 2. Merge uv
         let res2 = {
-            let mut branched = self.fork_new_branch();
-            //let uv = branched.g.get_mut(u, v);
-            let uv = branched.g.get(u, v);
+            let uv = this.g.get(u, v);
             // TODO: Might not need this check after edge merging is in? Maybe?
             if uv.is_finite() {
-                branched.path_log.push_str(&format!(
+                this.path_log.push_str(&format!(
                     "Branch: Merge {:?}-{:?}, k after merging: {} !\n",
-                    branched.imap[u], branched.imap[v], branched.k
+                    this.imap[u], this.imap[v], this.k
                 ));
 
-                let _imap_u = branched.imap[u].clone();
-                let _imap_v = branched.imap[v].clone();
-                branched.merge(u, v);
+                let _imap_u = this.imap[u].clone();
+                let _imap_v = this.imap[v].clone();
+                this.merge(u, v);
 
-                if branched.k >= 0.0 {
+                if this.k >= 0.0 {
                     dbg_trace_indent!(
-                        self,
+                        this,
                         _k_start,
                         "Branch: Merge {:?}-{:?}, k after merging: {} !",
                         _imap_u,
                         _imap_v,
-                        branched.k
+                        this.k
                     );
-                    branched.find_cluster_editing()
+                    this.find_cluster_editing()
                 } else {
                     dbg_trace_indent!(
-                        self,
+                        this,
                         _k_start,
                         "Skipping Branch: Merging {:?}-{:?} reduces k past 0!",
                         _imap_u,
                         _imap_v
                     );
-                    None
+                    (false, this)
                 }
             } else {
-                None
+                (false, this)
             }
         };
 
         res2
-        /*match (res1, res2) {
-            (None, None) => None,
-            (None, Some(r)) => Some(r),
-            (Some(r), None) => Some(r),
-            (Some(r1), Some(r2)) => {
-                dbg_trace_indent!(
-                    self,
-                    self.k,
-                    "Both branches succeeded, with k1={} and k2={}.",
-                    r1.k,
-                    r2.k
-                );
-
-                if r1.k > r2.k {
-                    Some(r1)
-                } else {
-                    Some(r2)
-                }
-            }
-        }*/
     }
 
     /// Merge u and v. The merged vertex becomes the new vertex at index u in the graph, while v is
@@ -529,9 +517,6 @@ impl<'a> ProblemInstance<'a> {
     pub fn merge(&mut self, u: usize, v: usize) {
         assert!(self.g.is_present(u));
         assert!(self.g.is_present(v));
-        if self.g.get(u, v) < Weight::ZERO {
-            log::warn!("merge uv: {}", self.g.get(u, v));
-        }
         assert!(self.g.get(u, v) >= Weight::ZERO);
 
         let _start_k = self.k;

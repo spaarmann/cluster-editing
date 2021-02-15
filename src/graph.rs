@@ -23,6 +23,12 @@ impl GraphWeight for i32 {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
+pub enum Op<T: GraphWeight> {
+    Set { u: usize, v: usize, prev: T },
+    NotPresent(usize),
+}
+
 /// An undirected graph without self-loops that stores weights for every pair of vertices (so, for
 /// edges and for non-edges).
 /// Edges have weights >0, non-edges have weights <0.
@@ -42,6 +48,7 @@ pub struct Graph<T: GraphWeight> {
     /// whether a vertex is removed, using `.is_present(u)`.
     present: Vec<bool>,
     present_count: usize,
+    oplog: Vec<Op<T>>,
 }
 
 impl<T: GraphWeight> Graph<T> {
@@ -56,6 +63,7 @@ impl<T: GraphWeight> Graph<T> {
             matrix: vec![T::NEG_ONE; mat_size],
             present: vec![true; size],
             present_count: size,
+            oplog: Vec::new(),
         }
     }
 
@@ -128,8 +136,12 @@ impl<T: GraphWeight> Graph<T> {
         debug_assert!(self.present[v]);
         assert_ne!(u, v);
 
+        let prev = self.matrix[u * self.size + v];
+
         self.matrix[u * self.size + v] = w;
         self.matrix[v * self.size + u] = w;
+
+        self.oplog.push(Op::Set { u, v, prev });
     }
 
     /// Returns an iterator over the open neighborhood of `u` (i.e., not including `u` itself).
@@ -202,6 +214,28 @@ impl<T: GraphWeight> Graph<T> {
         assert!(self.present[u]);
         self.present[u] = false;
         self.present_count -= 1;
+
+        self.oplog.push(Op::NotPresent(u));
+    }
+
+    pub fn oplog_len(&self) -> usize {
+        self.oplog.len()
+    }
+
+    pub fn rollback_to(&mut self, oplog_len: usize) {
+        for op in self.oplog.drain(oplog_len..).rev() {
+            match op {
+                Op::Set { u, v, prev } => {
+                    // Don't use `set` here, that would modify the oplog again!
+                    self.matrix[u * self.size + v] = prev;
+                    self.matrix[v * self.size + u] = prev;
+                }
+                Op::NotPresent(u) => {
+                    self.present[u] = true;
+                    self.present_count += 1;
+                }
+            }
+        }
     }
 
     /// Splits a graph into its connected components.
