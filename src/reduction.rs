@@ -2,7 +2,7 @@ use crate::{
     algo::ProblemInstance, critical_cliques, graph::GraphWeight, util::InfiniteNum, Graph, Weight,
 };
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 
 #[derive(Clone, Debug, Default)]
 pub struct ReductionStorage {
@@ -130,9 +130,9 @@ pub fn rules123(p: &mut ProblemInstance) -> bool {
         row_offset + u
     }
 
-    let mut edges_to_forbid = HashSet::new();
-    let mut edges_to_merge2 = HashSet::new();
-    let mut edges_to_merge3 = HashSet::new();
+    let mut edges_to_forbid = BTreeSet::new();
+    let mut edges_to_merge2 = BTreeSet::new();
+    let mut edges_to_merge3 = BTreeSet::new();
 
     for u in 0..p.g.size() {
         continue_if_not_present!(p.g, u);
@@ -221,7 +221,7 @@ pub fn rules123(p: &mut ProblemInstance) -> bool {
             u: usize,
             v: usize,
             diff: Weight,
-            edge_set: &mut HashSet<(usize, usize)>,
+            edge_set: &mut BTreeSet<(usize, usize)>,
         ) {
             let idx = u * p.g.size() + v;
             let prev = r.r1[idx];
@@ -252,7 +252,7 @@ pub fn rules123(p: &mut ProblemInstance) -> bool {
             u: usize,
             v: usize,
             diff: Weight,
-            edge_set: &mut HashSet<(usize, usize)>,
+            edge_set: &mut BTreeSet<(usize, usize)>,
         ) {
             let idx = u * p.g.size() + v;
             let prev = r.r2[idx];
@@ -282,7 +282,7 @@ pub fn rules123(p: &mut ProblemInstance) -> bool {
             u: usize,
             v: usize,
             diff: Weight,
-            edge_set: &mut HashSet<(usize, usize)>,
+            edge_set: &mut BTreeSet<(usize, usize)>,
         ) {
             let idx = r3idx(u.min(v), u.max(v));
             let prev = r.r3[idx];
@@ -780,7 +780,7 @@ pub fn rule5(p: &mut ProblemInstance) -> bool {
             relative_difference,
             relevant_pairs,
         }
-    };
+    }
 
     fn compute_max(
         d: &R5Data,

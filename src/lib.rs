@@ -1,3 +1,5 @@
+#![feature(btree_retain)]
+
 #[macro_use]
 pub mod util;
 
