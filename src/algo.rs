@@ -5,7 +5,7 @@ use crate::{
     Graph, PetGraph, Weight,
 };
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use log::info;
 use petgraph::graph::NodeIndex;
@@ -146,6 +146,8 @@ pub fn find_optimal_cluster_editing(
         instance.g.size()
     );
 
+    instance.find_initial_conflicts();
+
     if let Some(only_k) = params.debug_opts.get("only_k") {
         let only_k = only_k.parse::<usize>().unwrap();
         info!("[driver] Doing a single search with k={}...", only_k);
@@ -191,6 +193,8 @@ pub struct ProblemInstance<'a> {
     pub path_log: String,
     // Helpers for `reduction`, stored here to avoid allocating new ones as much.
     pub r: Option<reduction::ReductionStorage>,
+
+    conflicts: HashSet<(usize, usize, usize)>,
 }
 
 impl<'a> ProblemInstance<'a> {
@@ -205,6 +209,7 @@ impl<'a> ProblemInstance<'a> {
             edits: Vec::new(),
             path_log: String::new(),
             r: Some(Default::default()),
+            conflicts: Default::default(),
         }
     }
 
@@ -337,10 +342,11 @@ impl<'a> ProblemInstance<'a> {
 
         dbg_trace_indent!(self, _k_start, "Searching triple");
 
+        /*self.conflicts.clear();
+
         // Search for a conflict triple
         // TODO: Surely this can be done a little smarter?
-        let mut triple = None;
-        'outer: for u in self.g.nodes() {
+        for u in self.g.nodes() {
             for v in self.g.nodes() {
                 if u == v {
                     continue;
@@ -357,14 +363,26 @@ impl<'a> ProblemInstance<'a> {
 
                     if self.g.has_edge(u, w) && !self.g.has_edge(v, w) {
                         // `vuw` is a conflict triple!
-                        triple = Some((v, u, w));
-                        break 'outer;
+                        self.conflicts.push((v, u, w));
                     }
                 }
             }
-        }
+        }*/
 
-        let (v, u, _w) = match triple {
+        /* What does merging u-v do to a list of conflict triples?
+         * Obviously any triple involving v is scrapped.
+         * Now, in theory we might've changed {any pair in V\u}+u as a potential triple,
+         * because u's weight to literally everything else changed.
+         * We are iterating over all nodes to update their weigh to u already.
+         * For each of those, we could do an extra iteration over all nodes that were already
+         * updated, and check if it's now a conflict triple. This turns merging into O(n^2) instead
+         * of O(n).
+         * Technically we only need to check triples going from <=0 to >0 or vice-versa. We could
+         * track a bool per already-updated vertex for this and skip completely unomodified triples
+         * when going through the already-updated vertices.
+         */
+
+        let &(v, u, w) = match self.conflicts.iter().next() {
             None => {
                 // No more conflict triples.
                 // If there are still zero-edges, we need to "cash in" the 0.5 edit cost we deferred
@@ -404,19 +422,32 @@ impl<'a> ProblemInstance<'a> {
             Some(t) => t,
         };
 
+        self.conflicts.remove(&(v, u, w));
+        self.conflicts.remove(&(w, u, v));
+
+        if !self.g.is_present(u) {
+            log::error!("u {} not present, triple {:?}!", u, (v, u, w));
+        }
+        if !self.g.is_present(v) {
+            log::error!("v {} not present, triple {:?}!", v, (v, u, w));
+        }
+        if !self.g.is_present(w) {
+            log::error!("w {} not present, triple {:?}!", w, (v, u, w));
+        }
         dbg_trace_indent!(
             self,
             _k_start,
             "Found triple ({:?}-{:?}-{:?}), branching",
             self.imap[v],
             self.imap[u],
-            self.imap[_w]
+            self.imap[w]
         );
 
         let edit_len = self.edits.len();
         let oplog_len = self.g.oplog_len();
         let path_len = self.path_log.len();
         let prev_imap = self.imap.clone();
+        let prev_conflicts = self.conflicts.clone();
         let prev_k = self.k;
 
         // Found a conflict triple, now branch into 2 cases:
@@ -444,6 +475,10 @@ impl<'a> ProblemInstance<'a> {
                     Edit::delete(&mut self.edits, &self.imap, u, v);
                     self.g.set(u, v, InfiniteNum::NEG_INFINITY);
 
+                    self.conflicts.retain(|&(x, y, z)| {
+                        (x, y) != (u, v) && (y, z) != (u, v) && (x, y) != (v, u) && (y, z) != (v, u)
+                    });
+
                     self.find_cluster_editing()
                 } else {
                     dbg_trace_indent!(
@@ -468,6 +503,7 @@ impl<'a> ProblemInstance<'a> {
         this.g.rollback_to(oplog_len);
         this.path_log.truncate(path_len);
         this.imap = prev_imap;
+        this.conflicts = prev_conflicts;
         this.k = prev_k;
 
         // 2. Merge uv
@@ -512,6 +548,36 @@ impl<'a> ProblemInstance<'a> {
         res2
     }
 
+    fn find_initial_conflicts(&mut self) {
+        self.conflicts.clear();
+        for u in self.g.nodes() {
+            for v in self.g.nodes() {
+                if u == v {
+                    continue;
+                }
+
+                if !self.g.has_edge(u, v) {
+                    continue;
+                }
+
+                for w in (v + 1)..self.g.size() {
+                    if u == w {
+                        continue;
+                    }
+                    continue_if_not_present!(self.g, w);
+
+                    if self.g.has_edge(u, w) && !self.g.has_edge(v, w) {
+                        // `vuw` is a conflict triple!
+                        self.conflicts.insert((v, u, w));
+                        self.conflicts.insert((w, u, v));
+                    }
+                }
+            }
+        }
+
+        log::info!("Initial conflicts: {:?}", self.conflicts);
+    }
+
     /// Merge u and v. The merged vertex becomes the new vertex at index u in the graph, while v is
     /// marked as not present anymore.
     pub fn merge(&mut self, u: usize, v: usize) {
@@ -521,6 +587,9 @@ impl<'a> ProblemInstance<'a> {
 
         let _start_k = self.k;
         let _start_edit_len = self.edits.len();
+
+        self.conflicts
+            .retain(|&(x, y, z)| x != v && y != v && z != v);
 
         for w in 0..self.g.size() {
             if w == u || w == v || !self.g.is_present(w) {
@@ -568,6 +637,42 @@ impl<'a> ProblemInstance<'a> {
                 } else {
                     // (0, 0)
                     self.k -= 0.5;
+                }
+            }
+
+            let uw = self.g.get(u, w);
+            for x in 0..w {
+                if x == u || x == v {
+                    continue;
+                }
+                continue_if_not_present!(self.g, x);
+                // Update all possible conflict triples involving x, u, w
+                let xw = self.g.get(w, x);
+                let xu = self.g.get(u, x);
+
+                // x-u-w and w-u-x
+                if xu > Weight::ZERO && uw > Weight::ZERO && xw <= Weight::ZERO {
+                    self.conflicts.insert((x, u, w));
+                    self.conflicts.insert((w, u, x));
+                } else {
+                    self.conflicts.remove(&(x, u, w));
+                    self.conflicts.remove(&(w, u, x));
+                }
+                // u-x-w and w-x-u
+                if xu > Weight::ZERO && xw > Weight::ZERO && uw <= Weight::ZERO {
+                    self.conflicts.insert((u, x, w));
+                    self.conflicts.insert((w, x, u));
+                } else {
+                    self.conflicts.remove(&(u, x, w));
+                    self.conflicts.remove(&(w, x, u));
+                }
+                // u-w-x and x-w-u
+                if uw > Weight::ZERO && xw > Weight::ZERO && xu < Weight::ZERO {
+                    self.conflicts.insert((u, w, x));
+                    self.conflicts.insert((x, w, u));
+                } else {
+                    self.conflicts.remove(&(u, w, x));
+                    self.conflicts.remove(&(x, w, u));
                 }
             }
         }
