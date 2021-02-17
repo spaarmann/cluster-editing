@@ -591,6 +591,8 @@ impl<'a> ProblemInstance<'a> {
         self.conflicts
             .retain(|&(x, y, z)| x != v && y != v && z != v);
 
+        let mut flipped = vec![false; self.g.size()];
+
         for w in 0..self.g.size() {
             if w == u || w == v || !self.g.is_present(w) {
                 continue;
@@ -640,11 +642,23 @@ impl<'a> ProblemInstance<'a> {
                 }
             }
 
+            let prev_uw = uw;
             let uw = self.g.get(u, w);
+
+            let uw_flipped = (prev_uw <= Weight::ZERO && uw > Weight::ZERO)
+                || (prev_uw > Weight::ZERO && uw <= Weight::ZERO);
+
+            flipped[w] = uw_flipped;
+
             for x in 0..w {
+                if !flipped[x] && !uw_flipped {
+                    continue;
+                }
+
                 if x == u || x == v {
                     continue;
                 }
+
                 continue_if_not_present!(self.g, x);
                 // Update all possible conflict triples involving x, u, w
                 let xw = self.g.get(w, x);
