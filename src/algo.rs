@@ -167,7 +167,8 @@ pub fn find_optimal_cluster_editing(
 
         let mut instance = instance.fork_new_branch();
         instance.k = k;
-        if let (true, instance) = instance.find_cluster_editing() {
+        let (success, instance) = instance.find_cluster_editing();
+        if success {
             if !instance.path_log.is_empty() {
                 log::info!("Final path debug log:\n{}", instance.path_log);
             }
@@ -319,6 +320,8 @@ impl<'a> ProblemInstance<'a> {
                 reduction::fast_param_independent_reduction(&mut self);
                 self.full_reduction_counter -= 1;
             }
+
+            reduction::param_dependent_reduction(&mut self);
 
             dbg_trace_indent!(
                 self,

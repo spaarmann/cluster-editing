@@ -1,5 +1,9 @@
 use crate::{
-    algo::ProblemInstance, critical_cliques, graph::GraphWeight, util::InfiniteNum, Graph, Weight,
+    algo::{Edit, ProblemInstance},
+    critical_cliques,
+    graph::GraphWeight,
+    util::InfiniteNum,
+    Graph, Weight,
 };
 
 use std::collections::{BTreeSet, HashSet};
@@ -44,6 +48,32 @@ pub fn initial_param_independent_reduction(p: &mut ProblemInstance) -> f32 {
     }
 
     k_start
+}
+
+pub fn param_dependent_reduction(p: &mut ProblemInstance) {
+    let _k_start = p.k;
+
+    if p.k <= Weight::ZERO {
+        return;
+    }
+
+    dbg_trace_indent!(
+        p,
+        _k_start,
+        "Starting param-dep-reduction, k {}, edits {:?}.",
+        p.k,
+        p.edits
+    );
+
+    induced_cost_reduction(p);
+
+    dbg_trace_indent!(
+        p,
+        _k_start,
+        "Finished param-dep-reduction, {}, edits {:?}.",
+        p.k,
+        p.edits
+    );
 }
 
 /// Rules from "Böcker et al., Exact Algorithms for Cluster Editing: Evaluation and
@@ -1017,4 +1047,124 @@ fn min_cut(g: &Graph<Weight>, c: &HashSet<usize>, a: usize) -> Weight {
     }
 
     best
+}
+
+fn induced_cost_reduction(p: &mut ProblemInstance) {
+    let mut u_neighbors = Vec::new();
+    let mut v_neighbors = Vec::new();
+
+    for u in 0..p.g.size() {
+        continue_if_not_present!(p.g, u);
+
+        u_neighbors.clear();
+        u_neighbors.extend(p.g.neighbors_with_weights(u));
+
+        for v in (u + 1)..p.g.size() {
+            continue_if_not_present!(p.g, v);
+
+            let uv = p.g.get(u, v);
+
+            if uv.is_infinite() {
+                // If the value is already forbidden, no point in trying anything here.
+                continue;
+            }
+
+            v_neighbors.clear();
+            v_neighbors.extend(p.g.neighbors_with_weights(v));
+
+            let mut icf = Weight::ZERO;
+            let mut icp = Weight::ZERO;
+
+            for &(w, uw) in u_neighbors.iter() {
+                // TODO: This isn't in the paper, but I think it's correct?
+                // Specifically, the symmetric difference of N(u) and N(v) technically includes
+                // both u and v, but including them here doesn't seem to make much sense.
+                if w == v {
+                    continue;
+                }
+
+                if let Some(&(_, vw)) = v_neighbors.iter().find(|&&(x, _)| w == x) {
+                    // w in intersection of neighborhoods.
+                    icf += uw.min(vw);
+                } else {
+                    // w in symmetric difference of neighborhoods.
+                    icp += uw.abs().min(p.g.get(v, w).abs());
+                }
+            }
+            for &(w, vw) in v_neighbors.iter() {
+                // TODO: This isn't in the paper, but I think it's correct? See above.
+                if w == u {
+                    continue;
+                }
+
+                if let None = u_neighbors.iter().find(|&&(x, _)| w == x) {
+                    // w in second part of symmetric difference of neighborhoods.
+                    icp += vw.abs().min(p.g.get(u, w).abs());
+                }
+            }
+
+            // TODO: It seems the first condition should not be necessary, but not having it
+            // causes e.g. a run on exact011 to go to k=85 instead of k=81, and then finish with
+            // k=4 still left over :/
+            if uv <= Weight::ZERO && icp + (-uv).max(Weight::ZERO) > p.k {
+                p.path_log.push_str(&format!(
+                    "icp, forbid {:?}-{:?}, with icp {}, uv {} and k {}\n",
+                    p.imap[u], p.imap[v], icp, uv, p.k
+                ));
+                dbg_trace_indent!(
+                    p,
+                    p.k,
+                    "icp, forbid {:?}-{:?}, with icp {}, uv {} and k {}\n",
+                    p.imap[u],
+                    p.imap[v],
+                    icp,
+                    uv,
+                    p.k
+                );
+
+                if uv > Weight::ZERO {
+                    p.k -= uv;
+                    Edit::delete(&mut p.edits, &p.imap, u, v);
+                }
+
+                p.g.set(u, v, Weight::NEG_INFINITY);
+
+                if p.k <= 0.0 {
+                    return;
+                }
+
+                continue;
+            }
+            if icf + uv.max(Weight::ZERO) > p.k {
+                p.path_log.push_str(&format!(
+                    "icf, merge {:?}-{:?}, with icf {}, uv {} and k {}\n",
+                    p.imap[u], p.imap[v], icf, uv, p.k
+                ));
+                dbg_trace_indent!(
+                    p,
+                    p.k,
+                    "icf, merge {:?}-{:?}, with icf {}, uv {} and k {}\n",
+                    p.imap[u],
+                    p.imap[v],
+                    icf,
+                    uv,
+                    p.k
+                );
+
+                if uv < Weight::ZERO {
+                    p.k += uv;
+                    p.g.set(u, v, Weight::ZERO);
+                    Edit::insert(&mut p.edits, &p.imap, u, v);
+                }
+
+                p.merge(u, v);
+
+                if p.k <= 0.0 {
+                    return;
+                }
+
+                continue;
+            }
+        }
+    }
 }
