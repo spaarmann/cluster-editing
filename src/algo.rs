@@ -313,13 +313,13 @@ impl<'a> ProblemInstance<'a> {
 
             dbg_trace_indent!(self, self.k, "Performing reduction");
 
-            if self.full_reduction_counter == 0 {
+            /*if self.full_reduction_counter == 0 {
                 reduction::full_param_independent_reduction(&mut self);
                 self.full_reduction_counter = self.params.full_reduction_interval;
             } else {
                 reduction::fast_param_independent_reduction(&mut self);
                 self.full_reduction_counter -= 1;
-            }
+            }*/
 
             reduction::param_dependent_reduction(&mut self);
 
