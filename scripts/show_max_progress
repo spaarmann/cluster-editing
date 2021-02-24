@@ -1,0 +1,24 @@
+#!/usr/bin/env fish
+
+# Parse command line args
+set argc (count $argv)
+if test "$argc" != 1
+	echo "Usage: show_max_progress <run>"
+	exit 1
+else
+	set run "$argv[1]"
+end
+
+echo "Finding maximum progress for $run"
+
+set instances (ls "$run/runner_out/" | grep ".out" | sed -r 's/.*\/(exact.*)/\1/g')
+
+set instance_diff (diff (echo "$instances1" | tr " " "\n" | psub) (echo "$instances2" | tr " " "\n" | psub))
+
+for instance in $instances
+	# [2021-02-22T15:45:43Z INFO  cluster_editing::algo] [driver] Starting search with k=3...
+	set ks (grep "Starting search with k=" "$run/runner_out/$instance" | sed -r 's/.*Starting search with k=([0-9]+).*/\1/g')
+	set max_k (echo "$ks" | tr " " "\n" | sort -n | tr "\n" " " | sed -r 's/.* ([0-9]+)/\1/g')
+
+	echo "$instance max_k: $max_k"
+end
