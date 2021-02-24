@@ -47,10 +47,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         for c in components.into_iter() {
             let (cg, imap) = c;
-            let params = cluster_editing::algo::Parameters {
-                full_reduction_interval: 6,
-                debug_opts: HashMap::new(),
-            };
+            let params = cluster_editing::algo::Parameters::new(6, HashMap::new(), None);
             let mut instance = cluster_editing::algo::ProblemInstance::new(&params, cg, imap);
             instance.k = f32::MAX;
             instance.k_max = f32::MAX;

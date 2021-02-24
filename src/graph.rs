@@ -195,6 +195,20 @@ impl<T: GraphWeight> Graph<T> {
         //(0..self.size).filter(move |&v| self.present[v]).count()
     }
 
+    pub fn edge_count(&self) -> usize {
+        let mut count = 0;
+        for u in self.nodes() {
+            for v in (u + 1)..self.size {
+                continue_if_not_present!(self, v);
+                if self.get(u, v) > T::ZERO {
+                    count += 1;
+                }
+            }
+        }
+
+        count
+    }
+
     /// Returns an iterator over all the nodes present in the graph.
     pub fn nodes(&self) -> impl Iterator<Item = usize> + '_ {
         (0..self.size).filter(move |&v| self.present[v])

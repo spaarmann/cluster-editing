@@ -1,11 +1,15 @@
 use crate::{
     graph::{GraphWeight, IndexMap},
     reduction,
-    util::InfiniteNum,
+    util::{FloatKey, InfiniteNum},
     Graph, PetGraph, Weight,
 };
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::{prelude::*, BufWriter};
+use std::path::PathBuf;
 
 use log::info;
 use petgraph::graph::NodeIndex;
@@ -34,13 +38,50 @@ impl Edit {
     }
 }
 
-#[derive(Debug)]
+#[derive(Default, Debug)]
+struct ComponentStatistics {
+    // fast_param_indep_reduction[max_k][k] = x => in the run starting with k=max_k, at k=k
+    // the fast reduction achieved a reduction in `k` of `x`.
+    fast_param_indep_reduction: HashMap<usize, HashMap<FloatKey, f32>>,
+    // full_param_indep_reduction[max_k][k] = x => in the run starting with k=max_k, at k=k
+    // the full reduction achieved a reduction in `k` of `x`.
+    full_param_indep_reduction: HashMap<usize, HashMap<FloatKey, f32>>,
+    // param_dep_reduction[max_k][k] = x => in the run starting with k=max_k, at k=k
+    // the param-dependent reduction achieved a reduction in `k` of `x`.
+    param_dep_reduction: HashMap<usize, HashMap<FloatKey, f32>>,
+    // Reduction of node count from the initial param-independent reduction.
+    initial_reduction: usize,
+    component_node_count: usize,
+    component_edge_count: usize,
+}
+
+#[derive(Debug, Default)]
 pub struct Parameters {
     pub full_reduction_interval: i32,
     pub debug_opts: HashMap<String, String>,
+    pub stats_dir: Option<PathBuf>,
+
+    // This doesn't really belong here, but it's a convenient place
+    // to access from everywhere, throughout the whole algorithm.
+    stats: RefCell<ComponentStatistics>,
 }
 
-pub fn execute_algorithm(graph: &PetGraph, params: Parameters) -> PetGraph {
+impl Parameters {
+    pub fn new(
+        full_reduction_interval: i32,
+        debug_opts: HashMap<String, String>,
+        stats_dir: Option<PathBuf>,
+    ) -> Self {
+        Self {
+            full_reduction_interval,
+            debug_opts,
+            stats_dir,
+            stats: Default::default(),
+        }
+    }
+}
+
+pub fn execute_algorithm(graph: &PetGraph, mut params: Parameters) -> PetGraph {
     let mut result = graph.clone();
     let (g, imap) = Graph::<Weight>::new_from_petgraph(&graph);
     let (components, _) = g.split_into_components(&imap);
@@ -52,6 +93,14 @@ pub fn execute_algorithm(graph: &PetGraph, params: Parameters) -> PetGraph {
 
     for (i, c) in components.into_iter().enumerate() {
         let (cg, imap) = c;
+
+        if params.stats_dir.is_some() {
+            let mut comp_statistics = ComponentStatistics::default();
+            comp_statistics.component_node_count = cg.present_node_count();
+            comp_statistics.component_edge_count = cg.edge_count();
+            params.stats = RefCell::new(comp_statistics);
+        }
+
         info!("Solving component {}...", i);
         let (k, edits) = find_optimal_cluster_editing(&cg, &imap, &params);
 
@@ -62,6 +111,10 @@ pub fn execute_algorithm(graph: &PetGraph, params: Parameters) -> PetGraph {
             i,
             edits
         );
+
+        if let Some(ref stats_dir) = params.stats_dir {
+            write_stat_block(stats_dir, params.stats.take(), i);
+        }
 
         for edit in edits {
             match edit {
@@ -146,12 +199,15 @@ pub fn find_optimal_cluster_editing(
         instance.g.size()
     );
 
+    params.stats.borrow_mut().initial_reduction = original_node_count - instance.g.size();
+
     if let Some(only_k) = params.debug_opts.get("only_k") {
         let only_k = only_k.parse::<usize>().unwrap();
         info!("[driver] Doing a single search with k={}...", only_k);
 
         let mut instance = instance.fork_new_branch();
         instance.k = only_k as f32;
+        instance.k_max = only_k as f32;
         if let (true, instance) = instance.find_cluster_editing() {
             log::info!("Found solution, final path log:\n{}", instance.path_log);
             return (instance.k as i32, instance.edits);
@@ -167,6 +223,7 @@ pub fn find_optimal_cluster_editing(
 
         let mut instance = instance.fork_new_branch();
         instance.k = k;
+        instance.k_max = k;
         let (success, instance) = instance.find_cluster_editing();
         if success {
             if !instance.path_log.is_empty() {
@@ -313,15 +370,49 @@ impl<'a> ProblemInstance<'a> {
 
             dbg_trace_indent!(self, self.k, "Performing reduction");
 
-            /*if self.full_reduction_counter == 0 {
+            if self.full_reduction_counter == 0 {
                 reduction::full_param_independent_reduction(&mut self);
                 self.full_reduction_counter = self.params.full_reduction_interval;
+
+                if self.params.stats_dir.is_some() {
+                    self.params
+                        .stats
+                        .borrow_mut()
+                        .full_param_indep_reduction
+                        .entry(self.k_max as usize) // k_max is always integer-valued, unlike k
+                        .or_default()
+                        .insert(FloatKey(_k_start), _k_start - self.k);
+                }
             } else {
                 reduction::fast_param_independent_reduction(&mut self);
                 self.full_reduction_counter -= 1;
-            }*/
 
+                if self.params.stats_dir.is_some() {
+                    self.params
+                        .stats
+                        .borrow_mut()
+                        .fast_param_indep_reduction
+                        .entry(self.k_max as usize) // k_max is always integer-valued, unlike k
+                        .or_default()
+                        .insert(FloatKey(_k_start), _k_start - self.k);
+                }
+            }
+
+            let k_before_param_dep_reduction = self.k;
             reduction::param_dependent_reduction(&mut self);
+
+            if self.params.stats_dir.is_some() {
+                self.params
+                    .stats
+                    .borrow_mut()
+                    .param_dep_reduction
+                    .entry(self.k_max as usize)
+                    .or_default()
+                    .insert(
+                        FloatKey(k_before_param_dep_reduction),
+                        k_before_param_dep_reduction - self.k,
+                    );
+            }
 
             dbg_trace_indent!(
                 self,
@@ -612,5 +703,58 @@ impl<'a> ProblemInstance<'a> {
             }
             return uw + vw;
         }
+    }
+}
+
+fn write_stat_block(stats_dir: &PathBuf, stats: ComponentStatistics, component_index: usize) {
+    std::fs::create_dir_all(stats_dir).unwrap();
+
+    let info_path = stats_dir.join(format!("comp_{}_info.stats", component_index));
+    std::fs::write(
+        &info_path,
+        format!(
+            "initial_reduction: {}\n\
+            node_count: {}\n\
+            edge_count: {}",
+            stats.initial_reduction, stats.component_node_count, stats.component_edge_count
+        )
+        .as_bytes(),
+    )
+    .unwrap();
+
+    for (k_max, reductions) in stats.fast_param_indep_reduction {
+        let path = stats_dir.join(format!("comp_{}_k{}_fast.stats", component_index, k_max));
+        let file = File::create(&path).unwrap();
+        let mut writer = BufWriter::new(file);
+        writeln!(writer, "k | red").unwrap();
+        for (k, v) in reductions {
+            writeln!(writer, "{} | {}", k.0, v).unwrap();
+        }
+        writer.flush().unwrap();
+    }
+
+    for (k_max, reductions) in stats.full_param_indep_reduction {
+        let path = stats_dir.join(format!("comp_{}_k{}_full.stats", component_index, k_max));
+        let file = File::create(&path).unwrap();
+        let mut writer = BufWriter::new(file);
+        writeln!(writer, "k | red").unwrap();
+        for (k, v) in reductions {
+            writeln!(writer, "{} | {}", k.0, v).unwrap();
+        }
+        writer.flush().unwrap();
+    }
+
+    for (k_max, reductions) in stats.param_dep_reduction {
+        let path = stats_dir.join(format!(
+            "comp_{}_k{}_paramdep.stats",
+            component_index, k_max
+        ));
+        let file = File::create(&path).unwrap();
+        let mut writer = BufWriter::new(file);
+        writeln!(writer, "k | red").unwrap();
+        for (k, v) in reductions {
+            writeln!(writer, "{} | {}", k.0, v).unwrap();
+        }
+        writer.flush().unwrap();
     }
 }

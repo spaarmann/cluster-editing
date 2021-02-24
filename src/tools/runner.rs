@@ -24,6 +24,8 @@ struct Opt {
         long = "solver"
     )]
     solver: PathBuf,
+    /// Optional arguments to pass along to the solver. Any `$i` will be replaced by the current
+    /// instance.
     #[structopt(long = "solver-args", default_value = "")]
     solver_args: String,
     /// Timeout per graph, in minutes.
@@ -94,6 +96,7 @@ fn do_file(
 
     let now = Instant::now();
     let mut command = Command::new(command);
+    let args = args.replace("$i", filename);
     if args.len() > 0 {
         command.args(args.split(' '));
     }

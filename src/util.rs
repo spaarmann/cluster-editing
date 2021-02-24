@@ -1,3 +1,5 @@
+use std::hash;
+
 #[allow(unused)]
 macro_rules! log_indent {
     ($k:expr, $l:expr, $s:expr) => (
@@ -71,3 +73,30 @@ impl InfiniteNum for f32 {
         self >= 100000000 || self <= -100000000
     }
 }*/
+
+/// This is dangerous to use in general!
+/// Provides an f32 wrapper that is Hash and Eq to use as a HashMap key.
+/// Uses bit-by-bit equality for hashing and comparisons; be very sure you want to use this
+/// and understand the problems.
+#[derive(Debug)]
+pub struct FloatKey(pub f32);
+
+impl FloatKey {
+    fn key(&self) -> u32 {
+        self.0.to_bits()
+    }
+}
+
+impl hash::Hash for FloatKey {
+    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+        self.key().hash(state)
+    }
+}
+
+impl PartialEq for FloatKey {
+    fn eq(&self, other: &FloatKey) -> bool {
+        self.key() == other.key()
+    }
+}
+
+impl Eq for FloatKey {}
