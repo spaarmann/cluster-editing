@@ -101,8 +101,12 @@ pub fn execute_algorithm(graph: &PetGraph, mut params: Parameters) -> PetGraph {
             params.stats = RefCell::new(comp_statistics);
         }
 
+        if let Some(ref stats_dir) = params.stats_dir {
+            write_stat_initial(&stats_dir, &params.stats.borrow(), i);
+        }
+
         info!("Solving component {}...", i);
-        let (k, edits) = find_optimal_cluster_editing(&cg, &imap, &params);
+        let (k, edits) = find_optimal_cluster_editing(&cg, &imap, &params, i);
 
         info!(
             "Found a cluster editing with k={} and {} edits for component {}: {:?}",
@@ -111,10 +115,6 @@ pub fn execute_algorithm(graph: &PetGraph, mut params: Parameters) -> PetGraph {
             i,
             edits
         );
-
-        if let Some(ref stats_dir) = params.stats_dir {
-            write_stat_block(stats_dir, params.stats.take(), i);
-        }
 
         for edit in edits {
             match edit {
@@ -179,6 +179,7 @@ pub fn find_optimal_cluster_editing(
     g: &Graph<Weight>,
     imap: &IndexMap,
     params: &Parameters,
+    comp_index: usize,
 ) -> (i32, Vec<Edit>) {
     // TODO: Not sure if executing the algo once with k = 0 is the best
     // way of handling already-disjoint-clique-components.
@@ -225,6 +226,11 @@ pub fn find_optimal_cluster_editing(
         instance.k = k;
         instance.k_max = k;
         let (success, instance) = instance.find_cluster_editing();
+
+        if let Some(ref stats_dir) = params.stats_dir {
+            write_stat_block(stats_dir, &params.stats.borrow(), comp_index, k as usize);
+        }
+
         if success {
             if !instance.path_log.is_empty() {
                 log::info!("Final path debug log:\n{}", instance.path_log);
@@ -706,7 +712,7 @@ impl<'a> ProblemInstance<'a> {
     }
 }
 
-fn write_stat_block(stats_dir: &PathBuf, stats: ComponentStatistics, component_index: usize) {
+fn write_stat_initial(stats_dir: &PathBuf, stats: &ComponentStatistics, component_index: usize) {
     std::fs::create_dir_all(stats_dir).unwrap();
 
     let info_path = stats_dir.join(format!("comp_{}_info.stats", component_index));
@@ -721,8 +727,15 @@ fn write_stat_block(stats_dir: &PathBuf, stats: ComponentStatistics, component_i
         .as_bytes(),
     )
     .unwrap();
+}
 
-    for (k_max, reductions) in stats.fast_param_indep_reduction {
+fn write_stat_block(
+    stats_dir: &PathBuf,
+    stats: &ComponentStatistics,
+    component_index: usize,
+    k_max: usize,
+) {
+    if let Some(reductions) = stats.fast_param_indep_reduction.get(&k_max) {
         let path = stats_dir.join(format!("comp_{}_k{}_fast.stats", component_index, k_max));
         let file = File::create(&path).unwrap();
         let mut writer = BufWriter::new(file);
@@ -733,7 +746,7 @@ fn write_stat_block(stats_dir: &PathBuf, stats: ComponentStatistics, component_i
         writer.flush().unwrap();
     }
 
-    for (k_max, reductions) in stats.full_param_indep_reduction {
+    if let Some(reductions) = stats.full_param_indep_reduction.get(&k_max) {
         let path = stats_dir.join(format!("comp_{}_k{}_full.stats", component_index, k_max));
         let file = File::create(&path).unwrap();
         let mut writer = BufWriter::new(file);
@@ -744,7 +757,7 @@ fn write_stat_block(stats_dir: &PathBuf, stats: ComponentStatistics, component_i
         writer.flush().unwrap();
     }
 
-    for (k_max, reductions) in stats.param_dep_reduction {
+    if let Some(reductions) = stats.param_dep_reduction.get(&k_max) {
         let path = stats_dir.join(format!(
             "comp_{}_k{}_paramdep.stats",
             component_index, k_max
