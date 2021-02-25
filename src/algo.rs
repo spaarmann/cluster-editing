@@ -376,34 +376,6 @@ impl<'a> ProblemInstance<'a> {
 
             dbg_trace_indent!(self, self.k, "Performing reduction");
 
-            if self.full_reduction_counter == 0 {
-                reduction::full_param_independent_reduction(&mut self);
-                self.full_reduction_counter = self.params.full_reduction_interval;
-
-                if self.params.stats_dir.is_some() {
-                    self.params
-                        .stats
-                        .borrow_mut()
-                        .full_param_indep_reduction
-                        .entry(self.k_max as usize) // k_max is always integer-valued, unlike k
-                        .or_default()
-                        .insert(FloatKey(_k_start), _k_start - self.k);
-                }
-            } else {
-                reduction::fast_param_independent_reduction(&mut self);
-                self.full_reduction_counter -= 1;
-
-                if self.params.stats_dir.is_some() {
-                    self.params
-                        .stats
-                        .borrow_mut()
-                        .fast_param_indep_reduction
-                        .entry(self.k_max as usize) // k_max is always integer-valued, unlike k
-                        .or_default()
-                        .insert(FloatKey(_k_start), _k_start - self.k);
-                }
-            }
-
             let k_before_param_dep_reduction = self.k;
             reduction::param_dependent_reduction(&mut self);
 
@@ -418,6 +390,35 @@ impl<'a> ProblemInstance<'a> {
                         FloatKey(k_before_param_dep_reduction),
                         k_before_param_dep_reduction - self.k,
                     );
+            }
+
+            let k_before_indep_reduction = self.k;
+            if self.full_reduction_counter == 0 {
+                reduction::full_param_independent_reduction(&mut self);
+                self.full_reduction_counter = self.params.full_reduction_interval;
+
+                if self.params.stats_dir.is_some() {
+                    self.params
+                        .stats
+                        .borrow_mut()
+                        .full_param_indep_reduction
+                        .entry(self.k_max as usize) // k_max is always integer-valued, unlike k
+                        .or_default()
+                        .insert(FloatKey(_k_start), k_before_indep_reduction - self.k);
+                }
+            } else {
+                reduction::fast_param_independent_reduction(&mut self);
+                self.full_reduction_counter -= 1;
+
+                if self.params.stats_dir.is_some() {
+                    self.params
+                        .stats
+                        .borrow_mut()
+                        .fast_param_indep_reduction
+                        .entry(self.k_max as usize) // k_max is always integer-valued, unlike k
+                        .or_default()
+                        .insert(FloatKey(_k_start), k_before_indep_reduction - self.k);
+                }
             }
 
             dbg_trace_indent!(
