@@ -341,10 +341,8 @@ pub fn rules123(p: &mut ProblemInstance) -> bool {
         if let Some(&(u, v)) = edges_to_forbid.iter().next() {
             edges_to_forbid.remove(&(u, v));
 
-            p.path_log.push_str(&format!(
-                "rule1, forbidding {:?}-{:?}\n",
-                p.imap[u], p.imap[v]
-            ));
+            append_path_log!(p, "rule1, forbidding {:?}-{:?}\n", p.imap[u], p.imap[v]);
+
             dbg_trace_indent!(p, p.k, "rule1, forbidding {:?}-{:?}", p.imap[u], p.imap[v]);
 
             debug_assert!(r.r1[u * p.g.size() + v] >= Weight::ZERO);
@@ -388,8 +386,7 @@ pub fn rules123(p: &mut ProblemInstance) -> bool {
             edges_to_merge2.remove(&(u, v));
             edges_to_merge3.remove(&(u.min(v), u.max(v)));
 
-            p.path_log
-                .push_str(&format!("rule2/3, merge {:?}-{:?}\n", p.imap[u], p.imap[v]));
+            append_path_log!(p, "rule2/3, merge {:?}-{:?}\n", p.imap[u], p.imap[v]);
             dbg_trace_indent!(p, p.k, "rule2/3 merge {:?}-{:?}", p.imap[u], p.imap[v]);
 
             debug_assert!(
@@ -727,10 +724,7 @@ pub fn rule4(p: &mut ProblemInstance) -> bool {
                             p.edits
                         );
 
-                        p.path_log.push_str(&format!(
-                            "rule4, merge {:?}-{:?}\n",
-                            p.imap[first], p.imap[v]
-                        ));
+                        append_path_log!(p, "rule4, merge {:?}-{:?}\n", p.imap[first], p.imap[v]);
 
                         p.merge(first, v);
                     }
@@ -947,10 +941,7 @@ pub fn rule5(p: &mut ProblemInstance) -> bool {
                     d.delta_v,
                     p.edits
                 );
-                p.path_log.push_str(&format!(
-                    "rule5, early merge {:?}-{:?}\n",
-                    p.imap[u], p.imap[v]
-                ));
+                append_path_log!(p, "rule5, early merge {:?}-{:?}\n", p.imap[u], p.imap[v]);
                 p.merge(u, v);
                 applied = true;
                 continue;
@@ -974,8 +965,7 @@ pub fn rule5(p: &mut ProblemInstance) -> bool {
                     max,
                     p.edits
                 );
-                p.path_log
-                    .push_str(&format!("rule5, merge {:?}-{:?}\n", p.imap[u], p.imap[v]));
+                append_path_log!(p, "rule5, merge {:?}-{:?}\n", p.imap[u], p.imap[v]);
                 p.merge(u, v);
                 applied = true;
                 continue;
@@ -1107,10 +1097,15 @@ fn induced_cost_reduction(p: &mut ProblemInstance) {
             // causes e.g. a run on exact011 to go to k=85 instead of k=81, and then finish with
             // k=4 still left over :/
             if uv <= Weight::ZERO && icp + (-uv).max(Weight::ZERO) > p.k {
-                p.path_log.push_str(&format!(
+                append_path_log!(
+                    p,
                     "icp, forbid {:?}-{:?}, with icp {}, uv {} and k {}\n",
-                    p.imap[u], p.imap[v], icp, uv, p.k
-                ));
+                    p.imap[u],
+                    p.imap[v],
+                    icp,
+                    uv,
+                    p.k
+                );
                 dbg_trace_indent!(
                     p,
                     p.k,
@@ -1136,10 +1131,15 @@ fn induced_cost_reduction(p: &mut ProblemInstance) {
                 continue;
             }
             if icf + uv.max(Weight::ZERO) > p.k {
-                p.path_log.push_str(&format!(
+                append_path_log!(
+                    p,
                     "icf, merge {:?}-{:?}, with icf {}, uv {} and k {}\n",
-                    p.imap[u], p.imap[v], icf, uv, p.k
-                ));
+                    p.imap[u],
+                    p.imap[v],
+                    icf,
+                    uv,
+                    p.k
+                );
                 dbg_trace_indent!(
                     p,
                     p.k,

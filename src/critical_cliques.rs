@@ -115,7 +115,7 @@ fn should_be_neighbors(g: &Graph<Weight>, c1: &CritClique, c2: &CritClique) -> b
 pub fn merge_cliques(
     g: &Graph<Weight>,
     imap: &IndexMap,
-    _final_path_debugs: &mut String,
+    _path_log: &mut String,
 ) -> (Graph<Weight>, IndexMap) {
     let mut crit = build_crit_clique_graph(g);
 
@@ -140,7 +140,7 @@ pub fn merge_cliques(
         );
 
         if crit_imap[u].len() > 1 {
-            _final_path_debugs.push_str(&format!("critcliques, merged {:?}\n", crit_imap[u]));
+            append_path_log_dir!(path_log, "critcliques, merged {:?}\n", crit_imap[u]);
         }
     }
 

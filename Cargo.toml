@@ -7,6 +7,10 @@ default-run = "cluster-editing"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+default = []
+path-log = []
+
 [dependencies]
 env_logger = "0.8.2"
 log = "0.4.11"

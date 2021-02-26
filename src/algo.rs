@@ -428,8 +428,7 @@ impl<'a> ProblemInstance<'a> {
                 _k_start,
                 self.k
             );
-            self.path_log
-                .push_str(&format!("Reduced from k={} to k={}\n", _k_start, self.k));
+            append_path_log!(self, "Reduced from k={} to k={}\n", _k_start, self.k);
         }
 
         if self.k < 0.0 {
@@ -490,10 +489,11 @@ impl<'a> ProblemInstance<'a> {
                     zero_count
                 );
 
-                self.path_log.push_str(&format!(
+                append_path_log!(
+                    self,
                     "Found no triple, realized {} zero-edges.\n",
                     zero_count
-                ));
+                );
 
                 if self.k < 0.0 {
                     // not enough cost left over to actually realize those zero-edges.
@@ -537,10 +537,13 @@ impl<'a> ProblemInstance<'a> {
                         self.imap[v],
                         self.k
                     );
-                    self.path_log.push_str(&format!(
+                    append_path_log!(
+                        self,
                         "Branch: Set {:?}-{:?} forbidden, k after edit: {} !\n",
-                        self.imap[u], self.imap[v], self.k
-                    ));
+                        self.imap[u],
+                        self.imap[v],
+                        self.k
+                    );
 
                     Edit::delete(&mut self.edits, &self.imap, u, v);
                     self.g.set(u, v, InfiniteNum::NEG_INFINITY);
@@ -576,10 +579,13 @@ impl<'a> ProblemInstance<'a> {
             let uv = this.g.get(u, v);
             // TODO: Might not need this check after edge merging is in? Maybe?
             if uv.is_finite() {
-                this.path_log.push_str(&format!(
+                append_path_log!(
+                    this,
                     "Branch: Merge {:?}-{:?}, k after merging: {} !\n",
-                    this.imap[u], this.imap[v], this.k
-                ));
+                    this.imap[u],
+                    this.imap[v],
+                    this.k
+                );
 
                 let _imap_u = this.imap[u].clone();
                 let _imap_v = this.imap[v].clone();

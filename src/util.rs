@@ -1,5 +1,23 @@
 use std::hash;
 
+macro_rules! append_path_log {
+    ($p:expr, $s:expr, $($arg:tt)+) => (
+        #[cfg(feature = "path-log")]
+        {
+            $p.path_log.push_str(&format!($s, $($arg)+));
+        }
+    )
+}
+
+macro_rules! append_path_log_dir {
+    ($l:expr, $s:expr, $($arg:tt)+) => (
+        #[cfg(feature = "path-log")]
+        {
+            $l.push_str(&format!($s, $($arg)+));
+        }
+    )
+}
+
 #[allow(unused)]
 macro_rules! log_indent {
     ($k:expr, $l:expr, $s:expr) => (
