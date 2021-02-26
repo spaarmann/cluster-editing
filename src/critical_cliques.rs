@@ -140,7 +140,7 @@ pub fn merge_cliques(
         );
 
         if crit_imap[u].len() > 1 {
-            append_path_log_dir!(path_log, "critcliques, merged {:?}\n", crit_imap[u]);
+            append_path_log_dir!(_path_log, "critcliques, merged {:?}\n", crit_imap[u]);
         }
     }
 

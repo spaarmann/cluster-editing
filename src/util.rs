@@ -33,14 +33,14 @@ macro_rules! log_indent {
 
 macro_rules! dbg_trace_indent {
     ($t:expr, $k:expr, $s:expr) => (
-        #[cfg(not(release))]
+        #[cfg(feature = "detailed-logs")]
         {
             log::log!(log::Level::Trace, concat!("{}[k={}]", $s),
                 "\t".repeat(($t.k_max - $k.max(0.0)) as usize), $k);
         }
     );
     ($t:expr, $k:expr, $s:expr, $($arg:tt)+) => (
-        #[cfg(not(release))]
+        #[cfg(feature = "detailed-logs")]
         {
             log::log!(log::Level::Trace, concat!("{}[k={}]", $s),
                 "\t".repeat(($t.k_max - $k.max(0.0)) as usize),
