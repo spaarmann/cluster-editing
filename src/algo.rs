@@ -58,6 +58,7 @@ struct ComponentStatistics {
 #[derive(Debug, Default)]
 pub struct Parameters {
     pub full_reduction_interval: i32,
+    pub fast_reduction_interval: i32,
     pub debug_opts: HashMap<String, String>,
     pub stats_dir: Option<PathBuf>,
 
@@ -69,11 +70,13 @@ pub struct Parameters {
 impl Parameters {
     pub fn new(
         full_reduction_interval: i32,
+        fast_reduction_interval: i32,
         debug_opts: HashMap<String, String>,
         stats_dir: Option<PathBuf>,
     ) -> Self {
         Self {
             full_reduction_interval,
+            fast_reduction_interval,
             debug_opts,
             stats_dir,
             stats: Default::default(),
@@ -251,6 +254,7 @@ pub struct ProblemInstance<'a> {
     pub k: f32,
     pub k_max: f32,
     pub full_reduction_counter: i32,
+    pub fast_reduction_counter: i32,
     pub edits: Vec<Edit>,
     pub path_log: String,
     // Helpers for `reduction`, stored here to avoid allocating new ones as much.
@@ -266,6 +270,7 @@ impl<'a> ProblemInstance<'a> {
             k: 0.0,
             k_max: 0.0,
             full_reduction_counter: 0,
+            fast_reduction_counter: 0,
             edits: Vec::new(),
             path_log: String::new(),
             r: Some(Default::default()),
@@ -407,17 +412,23 @@ impl<'a> ProblemInstance<'a> {
                         .insert(FloatKey(_k_start), k_before_indep_reduction - self.k);
                 }
             } else {
-                reduction::fast_param_independent_reduction(&mut self);
                 self.full_reduction_counter -= 1;
 
-                if self.params.stats_dir.is_some() {
-                    self.params
-                        .stats
-                        .borrow_mut()
-                        .fast_param_indep_reduction
-                        .entry(self.k_max as usize) // k_max is always integer-valued, unlike k
-                        .or_default()
-                        .insert(FloatKey(_k_start), k_before_indep_reduction - self.k);
+                if self.fast_reduction_counter == 0 {
+                    reduction::fast_param_independent_reduction(&mut self);
+                    self.fast_reduction_counter = self.params.fast_reduction_interval;
+
+                    if self.params.stats_dir.is_some() {
+                        self.params
+                            .stats
+                            .borrow_mut()
+                            .fast_param_indep_reduction
+                            .entry(self.k_max as usize) // k_max is always integer-valued, unlike k
+                            .or_default()
+                            .insert(FloatKey(_k_start), k_before_indep_reduction - self.k);
+                    }
+                } else {
+                    self.fast_reduction_counter -= 1;
                 }
             }
 
@@ -519,6 +530,8 @@ impl<'a> ProblemInstance<'a> {
         let path_len = self.path_log.len();
         let prev_imap = self.imap.clone();
         let prev_k = self.k;
+        let prev_full_counter = self.full_reduction_counter;
+        let prev_fast_counter = self.fast_reduction_counter;
 
         // Found a conflict triple, now branch into 2 cases:
         // 1. Set uv to forbidden
@@ -573,6 +586,8 @@ impl<'a> ProblemInstance<'a> {
         this.path_log.truncate(path_len);
         this.imap = prev_imap;
         this.k = prev_k;
+        this.full_reduction_counter = prev_full_counter;
+        this.fast_reduction_counter = prev_fast_counter;
 
         // 2. Merge uv
         let res2 = {

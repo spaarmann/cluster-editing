@@ -46,6 +46,9 @@ struct Opt {
     #[structopt(long = "full-reduction-interval", default_value = "6")]
     full_reduction_interval: i32,
 
+    #[structopt(long = "fast-reduction-interval", default_value = "2")]
+    fast_reduction_interval: i32,
+
     /// If specified, various statistics will be written into files in the given directory.
     #[structopt(long = "write-stats", parse(from_os_str))]
     stats_dir: Option<PathBuf>,
@@ -81,7 +84,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         .map(|o| o.into_iter().collect())
         .unwrap_or_else(|| HashMap::new());
 
-    let params = algo::Parameters::new(opt.full_reduction_interval, debug_opts, opt.stats_dir);
+    let params = algo::Parameters::new(
+        opt.full_reduction_interval,
+        opt.fast_reduction_interval,
+        debug_opts,
+        opt.stats_dir,
+    );
 
     info!("Running with debug options: {:?}", params.debug_opts);
 
