@@ -68,3 +68,9 @@ cp -r runner_out "$out_dir/"
 cat "$out_dir/runner_out/summary" >> "$out_dir/summary"
 
 echo "Perf run completed."
+
+echo -n (date +%d-%m-%Y)
+echo -n " - $revision: \""
+echo -n (git log -1 --pretty=%s)
+echo "\" ($solver_args)"
+echo "	$total_time seconds, $out_dir"
