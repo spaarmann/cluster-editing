@@ -6,6 +6,7 @@ pub mod util;
 pub mod algo;
 pub mod critical_cliques;
 pub mod graph;
+pub mod graph_writer;
 pub mod graphviz;
 pub mod parser;
 pub mod reduction;

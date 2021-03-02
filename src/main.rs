@@ -1,10 +1,12 @@
-use cluster_editing::{algo, graphviz, parser, Graph, PetGraph};
+#![feature(str_split_once)]
+
+use cluster_editing::{algo, graph_writer, graphviz, parser, Graph, PetGraph, Weight};
 
 use std::collections::HashMap;
 use std::error::Error;
 use std::path::PathBuf;
 
-use log::info;
+use log::{error, info};
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -27,10 +29,22 @@ struct Opt {
     #[structopt(short = "i", long = "print-input", parse(from_os_str))]
     print_input: Option<PathBuf>,
 
+    /// Writes the input graph file out in another format.
+    /// Syntax: `--write-input <format>:<path>.
+    /// Supported formats are: `tgf`.
+    #[structopt(long = "write-input")]
+    write_input: Option<String>,
+
     /// Print the output graph to the given path, as a PNG file.
     /// Requires a working graphviz installation accessible in the path.
     #[structopt(short = "o", long = "print-output", parse(from_os_str))]
     print_output: Option<PathBuf>,
+
+    /// Writes the output graph file out in another format.
+    /// Syntax: `--write-output <format>:<path>.
+    /// Supported formats are: `tgf`.
+    #[structopt(long = "write-output")]
+    write_output: Option<String>,
 
     /// Print the critical clique graph associated with the input graph, as a PNG file.
     /// Requires a working graphviz installation accessible in the path.
@@ -73,6 +87,19 @@ fn main() -> Result<(), Box<dyn Error>> {
         graphviz::print_graph(&opt.print_command, path, &graph);
     }
 
+    if let Some(spec) = opt.write_input {
+        match spec.split_once(':') {
+            None => error!("Format for --write-input not valid!"),
+            Some((format, path)) => {
+                let (graph, _) = Graph::<Weight>::new_from_petgraph(&graph);
+                match format {
+                    "tgf" => graph_writer::write_graph_tgf(&graph, None, path),
+                    _ => error!("Unknown format for --write-input!"),
+                }
+            }
+        }
+    }
+
     if let Some(path) = opt.print_cliques {
         let (graph, _) = Graph::new_from_petgraph(&graph);
         let crit_graph = cluster_editing::critical_cliques::build_crit_clique_graph(&graph);
@@ -105,6 +132,18 @@ fn main() -> Result<(), Box<dyn Error>> {
         graphviz::print_graph(&opt.print_command, path, &result);
     }
 
+    if let Some(spec) = opt.write_output {
+        match spec.split_once(':') {
+            None => error!("Format for --write-output not valid!"),
+            Some((format, path)) => {
+                let (graph, _) = Graph::<Weight>::new_from_petgraph(&result);
+                match format {
+                    "tgf" => graph_writer::write_graph_tgf(&graph, None, path),
+                    _ => error!("Unknown format for --write-output!"),
+                }
+            }
+        }
+    }
     Ok(())
 }
 
