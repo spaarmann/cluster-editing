@@ -31,13 +31,14 @@ pub enum Op<T: GraphWeight> {
 
 /// An undirected graph without self-loops that stores weights for every pair of vertices (so, for
 /// edges and for non-edges).
-/// Edges have weights >0, non-edges have weights <0.
+/// Edges have weights >0, non-edges have weights <0 (zero-edges are also permitted and considered
+/// to be non-edges by functions such has `neighbors`).
 ///
 /// Accessing self-loop weights will panic!
 #[derive(Clone, Debug)]
 pub struct Graph<T: GraphWeight> {
     size: usize,
-    /// The graph is internally stored as a full square matrix for each node pair.
+    /// The graph is internally stored as a full square adjacency matrix.
     matrix: Vec<T>,
     /// The data structure is treated as very fixed-size at the moment, but on order to efficiently
     /// merge vertices in the algorithm, it is possible to mark vertices as "removed"/not-present.
