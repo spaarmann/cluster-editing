@@ -1,18 +1,19 @@
 #!/usr/bin/env fish
 
 # Parse command line args
+# Use '--write-stats runner_out/$i_stats' as solver args to write stats for all instances.
 set argc (count $argv)
 if test "$argc" = 2
-	set write_stats 0
 	set timeout "$argv[1]"
 	set num_workers "$argv[2]"
+	set solver_args ""
 else
 	if test "$argc" = 3
-		set write_stats 1
-		set timeout "$argv[2]"
-		set num_workers "$argv[3]"
+		set timeout "$argv[1]"
+		set num_workers "$argv[2]"
+		set solver_args "$argv[3]" 
 	else
-		echo "Usage: compute_solvable_set [--write-stats] <timeout> <num_workers>"
+		echo "Usage: compute_solvable_set <timeout> <num_workers> [solver_args]"
 		exit 1
 	end
 end
@@ -30,14 +31,15 @@ set start_time (date -Isecond | tr ":" "-")
 
 echo "Starting complete run with $num_workers threads and a timeout of $timeout minutes."
 echo "Revision: $revision, date: $start_time"
+echo "Solver args: $solver_args"
 
 rm -r runner_out/*
 
 # Build and run
 RUSTFLAGS='-C target-cpu=native' cargo build --release
 
-if test $write_stats = 1
-	RUSTFLAGS='-C target-cpu=native' cargo run --release --bin runner -- --solver-args='--write-stats runner_out/$i_stats' --num-workers $num_workers --timeout $timeout runner_out instances/exact*.gr &| tee runner_out/summary
+if test -n "$solver_args"
+	RUSTFLAGS='-C target-cpu=native' cargo run --release --bin runner -- --solver-args="$solver_args" --num-workers $num_workers --timeout $timeout runner_out instances/exact*.gr &| tee runner_out/summary
 else
 	RUSTFLAGS='-C target-cpu=native' cargo run --release --bin runner -- --num-workers $num_workers --timeout $timeout runner_out instances/exact*.gr &| tee runner_out/summary
 end
@@ -52,6 +54,7 @@ cp -r runner_out "$out_dir/"
 
 echo "Executed with $num_workers threads and $timeout minute timeout." > "$out_dir/summary"
 echo "Revision $revision and start time $start_time" >> "$out_dir/summary"
+echo "Solver args: $solver_args" >> "$out_dir/summary"
 cat "$out_dir/runner_out/summary" >> "$out_dir/summary"
 
 # Gather list of completed instances
