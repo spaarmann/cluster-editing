@@ -290,7 +290,7 @@ impl<'a> ProblemInstance<'a> {
         let _k_start = self.k;
 
         if self.k > 0.0 {
-            /*let (components, component_map) = self.g.split_into_components(&self.imap);
+            let (components, component_map) = self.g.split_into_components(&self.imap);
             if components.len() > 1 {
                 // If a connected component decomposes into two components, we calculate
                 // the optimum solution for these components separately.
@@ -304,10 +304,12 @@ impl<'a> ProblemInstance<'a> {
                         _i,
                         self.k
                     );
-                    self.path_log.push_str(&format!(
+                    append_path_log!(
+                        self,
                         "Starting component {}, remaining k is {}\n",
-                        _i, self.k
-                    ));
+                        _i,
+                        self.k
+                    );
 
                     let comp_instance = ProblemInstance {
                         //params: self.params,
@@ -318,22 +320,20 @@ impl<'a> ProblemInstance<'a> {
 
                     // returns early if we can't even find a solution for the component,
                     // otherwise take the remaining k and proceed to the next component.
-                    match comp_instance.find_cluster_editing() {
-                        Some(comp_instance) => {
-                            self.k = comp_instance.k;
-                            self.edits = comp_instance.edits;
-                            self.path_log = comp_instance.path_log;
-                            self.r = comp_instance.r;
-                        }
-                        None => {
-                            dbg_trace_indent!(
-                                self,
-                                _k_start,
-                                "Finished component {} with 'no solution found', returning.",
-                                _i
-                            );
-                            return None;
-                        }
+                    let (comp_success, comp_instance) = comp_instance.find_cluster_editing();
+                    self.k = comp_instance.k;
+                    self.edits = comp_instance.edits;
+                    self.path_log = comp_instance.path_log;
+                    self.r = comp_instance.r;
+
+                    if !comp_success {
+                        dbg_trace_indent!(
+                            self,
+                            _k_start,
+                            "Finished component {} with 'no solution found', returning.",
+                            _i
+                        );
+                        return (false, self);
                     }
 
                     dbg_trace_indent!(
@@ -343,10 +343,12 @@ impl<'a> ProblemInstance<'a> {
                         _i,
                         self.k
                     );
-                    self.path_log.push_str(&format!(
+                    append_path_log!(
+                        self,
                         "Finished component {}, remaining k is {}\n",
-                        _i, self.k
-                    ));
+                        _i,
+                        self.k
+                    );
                 }
 
                 // We still need to "cash in" any zero-edges that connect the different components.
@@ -372,12 +374,19 @@ impl<'a> ProblemInstance<'a> {
                     self.k
                 );
 
+                // TODO: I believe this is currently *correct* even though it does not properly
+                // create oplog entries. This is because the actual graph is not modified at all,
+                // we only modify the components and create new edits. Thus no oplog-rollback is
+                // necessary for the original graph.
+                // *However*, this seems pretty fragile and easy to mess up in the future. If we
+                // actually keep component splitting in some way, it should do this better.
+
                 if self.k >= 0.0 {
-                    return Some(self);
+                    return (true, self);
                 } else {
-                    return None;
+                    return (false, self);
                 }
-            }*/
+            }
 
             dbg_trace_indent!(self, self.k, "Performing reduction");
 
