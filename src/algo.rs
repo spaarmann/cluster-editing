@@ -290,7 +290,7 @@ impl<'a> ProblemInstance<'a> {
         let _k_start = self.k;
 
         if self.k > 0.0 {
-            let (components, component_map) = self.g.split_into_components(&self.imap);
+            /*let (components, component_map) = self.g.split_into_components(&self.imap);
             if components.len() > 1 {
                 // If a connected component decomposes into two components, we calculate
                 // the optimum solution for these components separately.
@@ -386,7 +386,7 @@ impl<'a> ProblemInstance<'a> {
                 } else {
                     return (false, self);
                 }
-            }
+            }*/
 
             dbg_trace_indent!(self, self.k, "Performing reduction");
 
