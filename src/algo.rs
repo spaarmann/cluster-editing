@@ -1,5 +1,5 @@
 use crate::{
-    graph::{GraphWeight, IndexMap},
+    graph::{GraphView, GraphWeight, IndexMap},
     reduction,
     util::{FloatKey, InfiniteNum},
     Graph, PetGraph, Weight,
@@ -87,7 +87,8 @@ impl Parameters {
 pub fn execute_algorithm(graph: &PetGraph, mut params: Parameters) -> PetGraph {
     let mut result = graph.clone();
     let (g, imap) = Graph::<Weight>::new_from_petgraph(&graph);
-    let (components, _) = g.split_into_components(&imap);
+    let g = GraphView::new_from_graph(g);
+    let (components, _) = g.split_into_components();
 
     info!(
         "Decomposed input graph into {} components",
@@ -95,12 +96,10 @@ pub fn execute_algorithm(graph: &PetGraph, mut params: Parameters) -> PetGraph {
     );
 
     for (i, c) in components.into_iter().enumerate() {
-        let (cg, imap) = c;
-
         if params.stats_dir.is_some() {
             let mut comp_statistics = ComponentStatistics::default();
-            comp_statistics.component_node_count = cg.present_node_count();
-            comp_statistics.component_edge_count = cg.edge_count();
+            comp_statistics.component_node_count = c.present_node_count();
+            comp_statistics.component_edge_count = c.edge_count();
             params.stats = RefCell::new(comp_statistics);
         }
 
@@ -109,7 +108,7 @@ pub fn execute_algorithm(graph: &PetGraph, mut params: Parameters) -> PetGraph {
         }
 
         info!("Solving component {}...", i);
-        let (k, edits) = find_optimal_cluster_editing(&cg, &imap, &params, i);
+        let (k, edits) = find_optimal_cluster_editing(&c, &imap, &params, i);
 
         info!(
             "Found a cluster editing with k={} and {} edits for component {}: {:?}",
@@ -179,7 +178,7 @@ pub fn execute_algorithm(graph: &PetGraph, mut params: Parameters) -> PetGraph {
 // to create `Edit` values that are usable on the original graph; we can create those by
 // using the imap.
 pub fn find_optimal_cluster_editing(
-    g: &Graph<Weight>,
+    g: &GraphView<Weight>,
     imap: &IndexMap,
     params: &Parameters,
     comp_index: usize,
@@ -194,7 +193,7 @@ pub fn find_optimal_cluster_editing(
     );
 
     let mut _path_debugs = String::new();
-    let mut instance = ProblemInstance::new(params, g.clone(), imap.clone());
+    let mut instance = ProblemInstance::new(params, g.clone_graph(), imap.clone());
     let k_start = reduction::initial_param_independent_reduction(&mut instance);
 
     info!(
@@ -246,10 +245,10 @@ pub fn find_optimal_cluster_editing(
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct ProblemInstance<'a> {
     pub params: &'a Parameters,
-    pub g: Graph<Weight>,
+    pub g: GraphView<Weight>,
     pub imap: IndexMap,
     pub k: f32,
     pub k_max: f32,
@@ -262,7 +261,7 @@ pub struct ProblemInstance<'a> {
 }
 
 impl<'a> ProblemInstance<'a> {
-    pub fn new(params: &'a Parameters, g: Graph<Weight>, imap: IndexMap) -> Self {
+    pub fn new(params: &'a Parameters, g: GraphView<Weight>, imap: IndexMap) -> Self {
         Self {
             params,
             g,
@@ -277,8 +276,20 @@ impl<'a> ProblemInstance<'a> {
         }
     }
 
+    // TODO: Rename, we're not actually using this for new branches ^^'
     fn fork_new_branch(&self) -> Self {
-        self.clone()
+        Self {
+            params: self.params,
+            g: self.g.clone_graph(),
+            imap: self.imap.clone(),
+            k: self.k,
+            k_max: self.k_max,
+            full_reduction_counter: self.full_reduction_counter,
+            fast_reduction_counter: self.fast_reduction_counter,
+            edits: self.edits.clone(),
+            path_log: self.path_log.clone(),
+            r: self.r.clone(),
+        }
     }
 
     /// Tries to find a solution of size <= k for this problem instance.

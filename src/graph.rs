@@ -1,3 +1,6 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
 pub trait GraphWeight: PartialOrd + Copy {
     const ZERO: Self;
     const ONE: Self;
@@ -47,9 +50,17 @@ pub struct Graph<T: GraphWeight> {
     /// performance reasons.
     /// Any users of this struct that iterate manually over some index range must check themself
     /// whether a vertex is removed, using `.is_present(u)`.
+    //present: Vec<bool>,
+    //present_count: usize,
+    oplog: Vec<Op<T>>,
+}
+
+#[derive(Debug)]
+pub struct GraphView<T: GraphWeight> {
+    graph: Rc<RefCell<Graph<T>>>,
+    // TODO: Docs
     present: Vec<bool>,
     present_count: usize,
-    oplog: Vec<Op<T>>,
 }
 
 impl<T: GraphWeight> Graph<T> {
@@ -62,8 +73,8 @@ impl<T: GraphWeight> Graph<T> {
         Graph {
             size,
             matrix: vec![T::NEG_ONE; mat_size],
-            present: vec![true; size],
-            present_count: size,
+            //present: vec![true; size],
+            //present_count: size,
             oplog: Vec::new(),
         }
     }
@@ -88,6 +99,50 @@ impl<T: GraphWeight> Graph<T> {
         (g, imap)
     }
 
+    /// Set the weight associated with pair `(u, v)`.
+    /// u and v can be in any order, panics if `u == v`.
+    pub fn set(&mut self, u: usize, v: usize, w: T) {
+        assert_ne!(u, v);
+
+        let prev = self.matrix[u * self.size + v];
+
+        self.matrix[u * self.size + v] = w;
+        self.matrix[v * self.size + u] = w;
+
+        self.oplog.push(Op::Set { u, v, prev });
+    }
+}
+
+impl<T: GraphWeight> GraphView<T> {
+    pub fn new_from_graph(graph: Graph<T>) -> Self {
+        let present = vec![true; graph.size];
+        let present_count = graph.size;
+
+        Self {
+            graph: Rc::new(RefCell::new(graph)),
+            present,
+            present_count,
+        }
+    }
+
+    pub fn clone_graph(&self) -> Self {
+        let new_graph = self.graph.borrow().clone();
+        let new_graph = Rc::new(RefCell::new(new_graph));
+        Self {
+            graph: new_graph,
+            present: self.present.clone(),
+            present_count: self.present_count,
+        }
+    }
+
+    pub fn clone_view(&self) -> Self {
+        Self {
+            graph: Rc::clone(&self.graph),
+            present: self.present.clone(),
+            present_count: self.present_count,
+        }
+    }
+
     /// Creates a petgraph graph from this graph and an optional IndexMap.
     pub fn into_petgraph(
         &self,
@@ -95,18 +150,20 @@ impl<T: GraphWeight> Graph<T> {
     ) -> petgraph::Graph<Vec<usize>, T, petgraph::Undirected> {
         use petgraph::prelude::NodeIndex;
 
-        let mut pg = petgraph::Graph::<_, _, _>::with_capacity(self.size, 0);
+        let g = self.graph.borrow();
 
-        let mut map = vec![NodeIndex::new(0); self.size];
-        for u in 0..self.size {
+        let mut pg = petgraph::Graph::<_, _, _>::with_capacity(g.size, 0);
+
+        let mut map = vec![NodeIndex::new(0); g.size];
+        for u in 0..g.size {
             if self.present[u] {
                 map[u] = pg.add_node(imap.map(|m| m[u].clone()).unwrap_or(vec![u]));
             }
         }
 
-        for u in 0..self.size {
+        for u in 0..g.size {
             if self.present[u] {
-                for v in (u + 1)..self.size {
+                for v in (u + 1)..g.size {
                     if self.present[v] {
                         let uv = self.get(u, v);
                         if uv > T::ZERO {
@@ -127,7 +184,8 @@ impl<T: GraphWeight> Graph<T> {
         debug_assert!(self.present[v]);
         assert_ne!(u, v);
 
-        self.matrix[u * self.size + v]
+        let g = self.graph.borrow();
+        g.matrix[u * g.size + v]
     }
 
     /// Set the weight associated with pair `(u, v)`.
@@ -137,12 +195,15 @@ impl<T: GraphWeight> Graph<T> {
         debug_assert!(self.present[v]);
         assert_ne!(u, v);
 
-        let prev = self.matrix[u * self.size + v];
+        let mut g = self.graph.borrow_mut();
 
-        self.matrix[u * self.size + v] = w;
-        self.matrix[v * self.size + u] = w;
+        let prev = g.matrix[u * g.size + v];
+        let size = g.size;
 
-        self.oplog.push(Op::Set { u, v, prev });
+        g.matrix[u * size + v] = w;
+        g.matrix[v * size + u] = w;
+
+        g.oplog.push(Op::Set { u, v, prev });
     }
 
     /// Returns an iterator over the open neighborhood of `u` (i.e., not including `u` itself).
@@ -188,7 +249,7 @@ impl<T: GraphWeight> Graph<T> {
     /// Returns the size of the graph.
     /// Note that this also includes nodes marked as "not present".
     pub fn size(&self) -> usize {
-        self.size
+        self.graph.borrow().size
     }
 
     pub fn present_node_count(&self) -> usize {
@@ -199,7 +260,7 @@ impl<T: GraphWeight> Graph<T> {
     pub fn edge_count(&self) -> usize {
         let mut count = 0;
         for u in self.nodes() {
-            for v in (u + 1)..self.size {
+            for v in (u + 1)..self.graph.borrow().size {
                 continue_if_not_present!(self, v);
                 if self.get(u, v) > T::ZERO {
                     count += 1;
@@ -212,7 +273,7 @@ impl<T: GraphWeight> Graph<T> {
 
     /// Returns an iterator over all the nodes present in the graph.
     pub fn nodes(&self) -> impl Iterator<Item = usize> + '_ {
-        (0..self.size).filter(move |&v| self.present[v])
+        (0..self.graph.borrow().size).filter(move |&v| self.present[v])
     }
 
     pub fn has_edge(&self, u: usize, v: usize) -> bool {
@@ -225,25 +286,30 @@ impl<T: GraphWeight> Graph<T> {
         self.present[u]
     }
 
+    // TODO: Clean up oplog handling with GraphView vs Graph
+
     pub fn set_not_present(&mut self, u: usize) {
         assert!(self.present[u]);
         self.present[u] = false;
         self.present_count -= 1;
 
-        self.oplog.push(Op::NotPresent(u));
+        self.graph.borrow_mut().oplog.push(Op::NotPresent(u));
     }
 
     pub fn oplog_len(&self) -> usize {
-        self.oplog.len()
+        self.graph.borrow().oplog.len()
     }
 
     pub fn rollback_to(&mut self, oplog_len: usize) {
-        for op in self.oplog.drain(oplog_len..).rev() {
+        let mut guard = self.graph.borrow_mut();
+        let g = &mut *guard;
+
+        for op in g.oplog.drain(oplog_len..).rev() {
             match op {
                 Op::Set { u, v, prev } => {
                     // Don't use `set` here, that would modify the oplog again!
-                    self.matrix[u * self.size + v] = prev;
-                    self.matrix[v * self.size + u] = prev;
+                    g.matrix[u * g.size + v] = prev;
+                    g.matrix[v * g.size + u] = prev;
                 }
                 Op::NotPresent(u) => {
                     self.present[u] = true;
@@ -257,16 +323,19 @@ impl<T: GraphWeight> Graph<T> {
     /// An associated index map is also split into equivalent maps for each individual component.
     /// In addition, this also provides a mapping from vertices in this graph to the index of the
     /// component they are a part of.
-    pub fn split_into_components(&self, imap: &IndexMap) -> (Vec<(Self, IndexMap)>, Vec<usize>) {
-        let mut visited = vec![false; self.size];
+    pub fn split_into_components(&self) -> (Vec<Self>, Vec<usize>) {
+        let g = self.graph.borrow();
+
+        let mut visited = vec![false; g.size];
         let mut stack = Vec::new();
         let mut components = Vec::new();
 
-        let mut current = Vec::new();
+        let mut current_present = vec![false; g.size];
+        let mut current_size = 0;
 
-        let mut component_map = vec![0; self.size];
+        let mut component_map = vec![0; g.size];
 
-        for u in 0..self.size {
+        for u in 0..g.size {
             if visited[u] || !self.present[u] {
                 continue;
             }
@@ -279,7 +348,9 @@ impl<T: GraphWeight> Graph<T> {
                 }
 
                 visited[v] = true;
-                current.push(v);
+                current_present[v] = true;
+                current_size += 1;
+                component_map[v] = components.len();
 
                 for n in self.neighbors(v) {
                     if !visited[n] {
@@ -288,22 +359,13 @@ impl<T: GraphWeight> Graph<T> {
                 }
             }
 
-            let mut comp = Self::new(current.len());
-            let mut comp_imap = IndexMap::new(current.len());
-            for i in 0..current.len() {
-                let v = current[i];
-                comp_imap[i] = imap[v].clone();
-                component_map[v] = components.len();
-
-                for j in 0..i {
-                    let w = current[j];
-
-                    comp.set(i, j, self.get(v, w));
-                }
-            }
-
-            components.push((comp, comp_imap));
-            current.clear();
+            let comp = Self {
+                graph: Rc::clone(&self.graph),
+                present: current_present,
+                present_count: current_size,
+            };
+            components.push(comp);
+            current_present = vec![false; g.size];
         }
 
         (components, component_map)
@@ -396,7 +458,7 @@ mod tests {
 
     #[test]
     fn neighbors() {
-        let g = example_graph();
+        let g = GraphView::new_from_graph(example_graph());
 
         assert_eq!(g.neighbors(0).collect::<Vec<_>>(), vec![1, 2]);
         assert_eq!(g.neighbors(1).collect::<Vec<_>>(), vec![0, 3]);
@@ -406,7 +468,7 @@ mod tests {
 
     #[test]
     fn closed_neighbors() {
-        let g = example_graph();
+        let g = GraphView::new_from_graph(example_graph());
 
         assert_eq!(g.closed_neighbors(0).collect::<Vec<_>>(), vec![0, 1, 2]);
         assert_eq!(g.closed_neighbors(1).collect::<Vec<_>>(), vec![0, 1, 3]);

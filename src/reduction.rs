@@ -1,9 +1,9 @@
 use crate::{
     algo::{Edit, ProblemInstance},
     critical_cliques,
-    graph::GraphWeight,
+    graph::{GraphView, GraphWeight},
     util::InfiniteNum,
-    Graph, Weight,
+    Weight,
 };
 
 use std::collections::{BTreeSet, HashSet};
@@ -757,7 +757,7 @@ pub fn rule5(p: &mut ProblemInstance) -> bool {
     }
 
     fn compute_initial_data<'a>(
-        g: &Graph<Weight>,
+        g: &GraphView<Weight>,
         relevant_pairs: &'a mut Vec<(Weight, Weight)>,
         u: usize,
         v: usize,
@@ -981,11 +981,11 @@ pub fn rule5(p: &mut ProblemInstance) -> bool {
     applied
 }
 
-fn min_cut(g: &Graph<Weight>, c: &HashSet<usize>, a: usize) -> Weight {
-    let mut g = g.clone();
+fn min_cut(g: &GraphView<Weight>, c: &HashSet<usize>, a: usize) -> Weight {
+    let mut g = g.clone_graph();
     let mut c = c.clone();
 
-    fn merge_mc(g: &mut Graph<Weight>, c: &mut HashSet<usize>, u: usize, v: usize) {
+    fn merge_mc(g: &mut GraphView<Weight>, c: &mut HashSet<usize>, u: usize, v: usize) {
         for &w in c.iter() {
             if w == u || w == v {
                 continue;
@@ -1000,7 +1000,7 @@ fn min_cut(g: &Graph<Weight>, c: &HashSet<usize>, a: usize) -> Weight {
         c.remove(&v);
     }
 
-    fn min_cut_phase(g: &mut Graph<Weight>, c: &mut HashSet<usize>, a: usize) -> Weight {
+    fn min_cut_phase(g: &mut GraphView<Weight>, c: &mut HashSet<usize>, a: usize) -> Weight {
         let mut set = HashSet::new();
         set.insert(a);
         let mut last_two = (a, 0);

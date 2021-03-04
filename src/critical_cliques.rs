@@ -1,5 +1,5 @@
 use crate::{
-    graph::{GraphWeight, IndexMap},
+    graph::{GraphView, GraphWeight, IndexMap},
     Graph, Weight,
 };
 
@@ -10,7 +10,7 @@ pub struct CritClique {
 
 pub struct CritCliqueGraph {
     pub cliques: Vec<CritClique>,
-    pub graph: Graph<Weight>,
+    pub graph: GraphView<Weight>,
 }
 
 impl CritCliqueGraph {
@@ -42,7 +42,7 @@ impl CritCliqueGraph {
     }
 }
 
-pub fn build_crit_clique_graph(g: &Graph<Weight>) -> CritCliqueGraph {
+pub fn build_crit_clique_graph(g: &GraphView<Weight>) -> CritCliqueGraph {
     let mut cliques = Vec::new();
 
     // TODO: This looks at least O(n^2) but should apparently be do-able in O(n + m), so have
@@ -92,11 +92,11 @@ pub fn build_crit_clique_graph(g: &Graph<Weight>) -> CritCliqueGraph {
 
     CritCliqueGraph {
         cliques,
-        graph: crit_graph,
+        graph: GraphView::new_from_graph(crit_graph),
     }
 }
 
-fn should_be_neighbors(g: &Graph<Weight>, c1: &CritClique, c2: &CritClique) -> bool {
+fn should_be_neighbors(g: &GraphView<Weight>, c1: &CritClique, c2: &CritClique) -> bool {
     for &u in &c1.vertices {
         for &v in &c2.vertices {
             if !g.has_edge(u, v) {
@@ -113,10 +113,10 @@ fn should_be_neighbors(g: &Graph<Weight>, c1: &CritClique, c2: &CritClique) -> b
 /// This assumes that the input graph is unweighted (i.e. all weights are +1 or -1 exactly). The
 /// reduced graph will be weighted however.
 pub fn merge_cliques(
-    g: &Graph<Weight>,
+    g: &GraphView<Weight>,
     imap: &IndexMap,
     _path_log: &mut String,
-) -> (Graph<Weight>, IndexMap) {
+) -> (GraphView<Weight>, IndexMap) {
     let mut crit = build_crit_clique_graph(g);
 
     let mut crit_imap = IndexMap::empty(crit.graph.size());
@@ -606,6 +606,8 @@ mod tests {
         graph.set(5, 6, Weight::ONE);
         graph.set(5, 7, Weight::ONE);
         graph.set(5, 8, Weight::ONE);
+
+        let graph = GraphView::new_from_graph(graph);
 
         let crit = build_crit_clique_graph(&graph);
 

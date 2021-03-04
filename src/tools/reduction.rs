@@ -1,4 +1,4 @@
-use cluster_editing::{parser, reduction, Graph, PetGraph};
+use cluster_editing::{graph::GraphView, parser, reduction, Graph, PetGraph};
 
 use std::collections::HashMap;
 use std::error::Error;
@@ -38,7 +38,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         let graph: PetGraph = parser::parse_file(&input)?;
         let (graph, imap) = Graph::new_from_petgraph(&graph);
-        let (components, _) = graph.split_into_components(&imap);
+        let graph = GraphView::new_from_graph(graph);
+        let (components, _) = graph.split_into_components();
 
         let before = graph.size();
         let mut after = 0;
@@ -46,9 +47,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         info!("Starting reduction on {}", filename);
 
         for c in components.into_iter() {
-            let (cg, imap) = c;
             let params = cluster_editing::algo::Parameters::new(6, 2, HashMap::new(), None);
-            let mut instance = cluster_editing::algo::ProblemInstance::new(&params, cg, imap);
+            let mut instance =
+                cluster_editing::algo::ProblemInstance::new(&params, c, imap.clone());
             instance.k = f32::MAX;
             instance.k_max = f32::MAX;
             reduction::initial_param_independent_reduction(&mut instance);

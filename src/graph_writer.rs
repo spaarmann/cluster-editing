@@ -1,4 +1,4 @@
-use crate::graph::{Graph, GraphWeight, IndexMap};
+use crate::graph::{GraphView, GraphWeight, IndexMap};
 
 use std::fmt::Display;
 use std::fs::File;
@@ -6,7 +6,7 @@ use std::io::{BufWriter, Write};
 use std::path::Path;
 
 pub fn write_graph_tgf<T: GraphWeight + Display, P: AsRef<Path>>(
-    g: &Graph<T>,
+    g: &GraphView<T>,
     imap: Option<&IndexMap>,
     path: P,
 ) {

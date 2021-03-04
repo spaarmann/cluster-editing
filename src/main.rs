@@ -1,6 +1,8 @@
 #![feature(str_split_once)]
 
-use cluster_editing::{algo, graph_writer, graphviz, parser, Graph, PetGraph, Weight};
+use cluster_editing::{
+    algo, graph::GraphView, graph_writer, graphviz, parser, Graph, PetGraph, Weight,
+};
 
 use std::collections::HashMap;
 use std::error::Error;
@@ -91,7 +93,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         match spec.split_once(':') {
             None => error!("Format for --write-input not valid!"),
             Some((format, path)) => {
-                let (graph, _) = Graph::<Weight>::new_from_petgraph(&graph);
+                let graph = GraphView::new_from_graph(Graph::<Weight>::new_from_petgraph(&graph).0);
                 match format {
                     "tgf" => graph_writer::write_graph_tgf(&graph, None, path),
                     _ => error!("Unknown format for --write-input!"),
@@ -101,7 +103,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     if let Some(path) = opt.print_cliques {
-        let (graph, _) = Graph::new_from_petgraph(&graph);
+        let graph = GraphView::new_from_graph(Graph::new_from_petgraph(&graph).0);
         let crit_graph = cluster_editing::critical_cliques::build_crit_clique_graph(&graph);
         graphviz::print_graph(&opt.print_command, path, &crit_graph.into_petgraph());
     }
@@ -136,7 +138,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         match spec.split_once(':') {
             None => error!("Format for --write-output not valid!"),
             Some((format, path)) => {
-                let (graph, _) = Graph::<Weight>::new_from_petgraph(&result);
+                let graph =
+                    GraphView::new_from_graph(Graph::<Weight>::new_from_petgraph(&result).0);
                 match format {
                     "tgf" => graph_writer::write_graph_tgf(&graph, None, path),
                     _ => error!("Unknown format for --write-output!"),
