@@ -49,12 +49,12 @@ cat "$instance_file" >> "$out_dir/summary"
 rm runner_out/*
 
 # Build and run
-RUSTFLAGS='-C target-cpu=native' cargo build --release
+cargo build --release
 
 if test -n "$solver_args"
-	RUSTFLAGS='-C target-cpu=native' cargo run --release --bin runner -- --num-workers $num_workers --timeout $timeout --solver-args="$solver_args" runner_out (cat "$instance_file") &| tee runner_out/summary
+	cargo run --release --bin runner -- --num-workers $num_workers --timeout $timeout --solver-args="$solver_args" runner_out (cat "$instance_file") &| tee runner_out/summary
 else
-	RUSTFLAGS='-C target-cpu=native' cargo run --release --bin runner -- --num-workers $num_workers --timeout $timeout runner_out (cat "$instance_file") &| tee runner_out/summary
+	cargo run --release --bin runner -- --num-workers $num_workers --timeout $timeout runner_out (cat "$instance_file") &| tee runner_out/summary
 end
 
 # Store and output timing

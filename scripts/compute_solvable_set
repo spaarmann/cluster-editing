@@ -36,12 +36,12 @@ echo "Solver args: $solver_args"
 rm -r runner_out/*
 
 # Build and run
-RUSTFLAGS='-C target-cpu=native' cargo build --release
+cargo build --release
 
 if test -n "$solver_args"
-	RUSTFLAGS='-C target-cpu=native' cargo run --release --bin runner -- --solver-args="$solver_args" --num-workers $num_workers --timeout $timeout runner_out instances/exact*.gr &| tee runner_out/summary
+	cargo run --release --bin runner -- --solver-args="$solver_args" --num-workers $num_workers --timeout $timeout runner_out instances/exact*.gr &| tee runner_out/summary
 else
-	RUSTFLAGS='-C target-cpu=native' cargo run --release --bin runner -- --num-workers $num_workers --timeout $timeout runner_out instances/exact*.gr &| tee runner_out/summary
+	cargo run --release --bin runner -- --num-workers $num_workers --timeout $timeout runner_out instances/exact*.gr &| tee runner_out/summary
 end
 
 # Copy output to storage
