@@ -301,13 +301,13 @@ impl<'a> ProblemInstance<'a> {
         let _k_start = self.k;
 
         if self.k > 0.0 {
-            /*let (components, component_map) = self.g.split_into_components(&self.imap);
+            let (components, component_map) = self.g.split_into_components();
             if components.len() > 1 {
                 // If a connected component decomposes into two components, we calculate
                 // the optimum solution for these components separately.
 
                 let _k_start = self.k;
-                for (_i, (comp, comp_imap)) in components.into_iter().enumerate() {
+                for (_i, comp) in components.into_iter().enumerate() {
                     dbg_trace_indent!(
                         self,
                         _k_start,
@@ -325,7 +325,6 @@ impl<'a> ProblemInstance<'a> {
                     let comp_instance = ProblemInstance {
                         //params: self.params,
                         g: comp,
-                        imap: comp_imap,
                         ..self
                     };
 
@@ -336,6 +335,7 @@ impl<'a> ProblemInstance<'a> {
                     self.edits = comp_instance.edits;
                     self.path_log = comp_instance.path_log;
                     self.r = comp_instance.r;
+                    self.imap = comp_instance.imap;
 
                     if !comp_success {
                         dbg_trace_indent!(
@@ -397,7 +397,7 @@ impl<'a> ProblemInstance<'a> {
                 } else {
                     return (false, self);
                 }
-            }*/
+            }
 
             dbg_trace_indent!(self, self.k, "Performing reduction");
 
