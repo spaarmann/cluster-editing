@@ -1,5 +1,5 @@
 use crate::{
-    graph::{GraphView, GraphWeight, IndexMap},
+    graph::{GraphView, GraphViewState, GraphWeight, IndexMap},
     reduction,
     util::{FloatKey, InfiniteNum},
     Graph, PetGraph, Weight,
@@ -86,8 +86,8 @@ impl Parameters {
 
 pub fn execute_algorithm(graph: &PetGraph, mut params: Parameters) -> PetGraph {
     let mut result = graph.clone();
-    let (g, imap) = Graph::<Weight>::new_from_petgraph(&graph);
-    let g = GraphView::new_from_graph(g);
+    let (mut graph_storage, imap) = Graph::<Weight>::new_from_petgraph(&graph);
+    let g = GraphView::new(&mut graph_storage);
     let (components, _) = g.split_into_components();
 
     info!(
@@ -95,7 +95,9 @@ pub fn execute_algorithm(graph: &PetGraph, mut params: Parameters) -> PetGraph {
         components.len()
     );
 
-    for (i, c) in components.into_iter().enumerate() {
+    for (i, c_state) in components.into_iter().enumerate() {
+        let c = c_state.realize(&mut graph_storage);
+
         if params.stats_dir.is_some() {
             let mut comp_statistics = ComponentStatistics::default();
             comp_statistics.component_node_count = c.present_node_count();
@@ -108,7 +110,9 @@ pub fn execute_algorithm(graph: &PetGraph, mut params: Parameters) -> PetGraph {
         }
 
         info!("Solving component {}...", i);
-        let (k, edits) = find_optimal_cluster_editing(&c, &imap, &params, i);
+        let c_state = c.into_state();
+        let (k, edits) =
+            find_optimal_cluster_editing(&mut graph_storage, &c_state, &imap, &params, i);
 
         info!(
             "Found a cluster editing with k={} and {} edits for component {}: {:?}",
@@ -178,7 +182,8 @@ pub fn execute_algorithm(graph: &PetGraph, mut params: Parameters) -> PetGraph {
 // to create `Edit` values that are usable on the original graph; we can create those by
 // using the imap.
 pub fn find_optimal_cluster_editing(
-    g: &GraphView<Weight>,
+    graph_storage: &mut Graph<Weight>,
+    g: &GraphViewState,
     imap: &IndexMap,
     params: &Parameters,
     comp_index: usize,
@@ -186,29 +191,38 @@ pub fn find_optimal_cluster_editing(
     // TODO: Not sure if executing the algo once with k = 0 is the best
     // way of handling already-disjoint-clique-components.
 
-    let original_node_count = g.size();
+    let initial_state = g.clone();
+    let initial_view = initial_state.realize(graph_storage);
+
+    let original_node_count = initial_view.size();
     info!(
         "Computing optimal solution for graph with {} nodes.",
         original_node_count
     );
 
-    let mut _path_debugs = String::new();
-    let mut instance = ProblemInstance::new(params, g.clone_graph(), imap.clone());
-    let k_start = reduction::initial_param_independent_reduction(&mut instance);
+    let mut path_log = String::new();
+    let (mut my_storage, imap, k_start) =
+        reduction::initial_crit_clique_reduction(graph_storage.clone(), &g, imap, &mut path_log);
+
+    let cloned_graph = my_storage.clone();
+    let initial_reduce_view = GraphView::new(&mut my_storage);
+
+    let mut instance = ProblemInstance::new(params, initial_reduce_view, imap.clone());
+    reduction::initial_param_independent_reduction(&mut instance);
 
     info!(
         "Reduced graph from {} nodes to {} nodes using parameter-independent reduction.",
         original_node_count,
         instance.g.size()
     );
-
     params.stats.borrow_mut().initial_reduction = original_node_count - instance.g.size();
 
     if let Some(only_k) = params.debug_opts.get("only_k") {
         let only_k = only_k.parse::<usize>().unwrap();
         info!("[driver] Doing a single search with k={}...", only_k);
 
-        let mut instance = instance.fork_new_branch();
+        let mut instance_storage = cloned_graph.clone();
+        let mut instance = instance.fork_new_branch(&mut instance_storage);
         instance.k = only_k as f32;
         instance.k_max = only_k as f32;
         if let (true, instance) = instance.find_cluster_editing() {
@@ -224,7 +238,8 @@ pub fn find_optimal_cluster_editing(
     loop {
         info!("[driver] Starting search with k={}...", k);
 
-        let mut instance = instance.fork_new_branch();
+        let mut instance_storage = cloned_graph.clone();
+        let mut instance = instance.fork_new_branch(&mut instance_storage);
         instance.k = k;
         instance.k_max = k;
         let (success, instance) = instance.find_cluster_editing();
@@ -245,10 +260,9 @@ pub fn find_optimal_cluster_editing(
     }
 }
 
-#[derive(Debug)]
-pub struct ProblemInstance<'a> {
+pub struct ProblemInstance<'a, 'g> {
     pub params: &'a Parameters,
-    pub g: GraphView<Weight>,
+    pub g: GraphView<'g, Weight>,
     pub imap: IndexMap,
     pub k: f32,
     pub k_max: f32,
@@ -260,8 +274,8 @@ pub struct ProblemInstance<'a> {
     pub r: Option<reduction::ReductionStorage>,
 }
 
-impl<'a> ProblemInstance<'a> {
-    pub fn new(params: &'a Parameters, g: GraphView<Weight>, imap: IndexMap) -> Self {
+impl<'a, 'g> ProblemInstance<'a, 'g> {
+    pub fn new(params: &'a Parameters, g: GraphView<'g, Weight>, imap: IndexMap) -> Self {
         Self {
             params,
             g,
@@ -277,10 +291,12 @@ impl<'a> ProblemInstance<'a> {
     }
 
     // TODO: Rename, we're not actually using this for new branches ^^'
-    fn fork_new_branch(&self) -> Self {
-        Self {
+    fn fork_new_branch<'n>(&self, new_storage: &'n mut Graph<Weight>) -> ProblemInstance<'a, 'n> {
+        let new_state = self.g.cloned_state();
+        let new_g = new_state.realize(new_storage);
+        ProblemInstance {
             params: self.params,
-            g: self.g.clone_graph(),
+            g: new_g,
             imap: self.imap.clone(),
             k: self.k,
             k_max: self.k_max,
@@ -301,13 +317,17 @@ impl<'a> ProblemInstance<'a> {
         let _k_start = self.k;
 
         if self.k > 0.0 {
-            let (components, component_map) = self.g.split_into_components();
+            let full_view = self.g;
+            let (components, component_map) = full_view.split_into_components();
+
+            let (mut graph_storage, full_state) = full_view.into_parts();
+
             if components.len() > 1 {
                 // If a connected component decomposes into two components, we calculate
                 // the optimum solution for these components separately.
 
                 let _k_start = self.k;
-                for (_i, comp) in components.into_iter().enumerate() {
+                for (_i, comp_state) in components.into_iter().enumerate() {
                     dbg_trace_indent!(
                         self,
                         _k_start,
@@ -324,7 +344,7 @@ impl<'a> ProblemInstance<'a> {
 
                     let comp_instance = ProblemInstance {
                         //params: self.params,
-                        g: comp,
+                        g: comp_state.realize(graph_storage),
                         ..self
                     };
 
@@ -337,6 +357,8 @@ impl<'a> ProblemInstance<'a> {
                     self.r = comp_instance.r;
                     self.imap = comp_instance.imap;
 
+                    graph_storage = comp_instance.g.into_parts().0;
+
                     if !comp_success {
                         dbg_trace_indent!(
                             self,
@@ -344,6 +366,7 @@ impl<'a> ProblemInstance<'a> {
                             "Finished component {} with 'no solution found', returning.",
                             _i
                         );
+                        self.g = full_state.realize(graph_storage);
                         return (false, self);
                     }
 
@@ -361,6 +384,8 @@ impl<'a> ProblemInstance<'a> {
                         self.k
                     );
                 }
+
+                self.g = full_state.realize(graph_storage);
 
                 // We still need to "cash in" any zero-edges that connect the different components.
                 let mut zero_count = 0.0;
@@ -397,6 +422,8 @@ impl<'a> ProblemInstance<'a> {
                 } else {
                     return (false, self);
                 }
+            } else {
+                self.g = full_state.realize(graph_storage);
             }
 
             dbg_trace_indent!(self, self.k, "Performing reduction");

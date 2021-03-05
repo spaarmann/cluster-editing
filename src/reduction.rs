@@ -1,7 +1,7 @@
 use crate::{
     algo::{Edit, ProblemInstance},
     critical_cliques,
-    graph::{GraphView, GraphWeight},
+    graph::{Graph, GraphView, GraphViewState, GraphWeight, IndexMap},
     util::InfiniteNum,
     Weight,
 };
@@ -22,14 +22,21 @@ pub struct ReductionStorage {
 }
 
 /// The reduction assumes an unweighted graph as input (i.e. one with only weights 1 and -1).
-pub fn initial_param_independent_reduction(p: &mut ProblemInstance) -> f32 {
+pub fn initial_crit_clique_reduction(
+    mut g: Graph<Weight>,
+    state: &GraphViewState,
+    imap: &IndexMap,
+    path_log: &mut String,
+) -> (Graph<Weight>, IndexMap, f32) {
     // Simply merging all critical cliques leads to a graph with at most 4 * k_opt vertices.
-    let (g, imap) = critical_cliques::merge_cliques(&p.g, &p.imap, &mut p.path_log);
-    p.g = g;
-    p.imap = imap;
+    let view = state.clone().realize(&mut g);
+    let (g, imap) = critical_cliques::merge_cliques(&view, imap, path_log);
+    let k_start = (g.size() / 4) as f32;
 
-    let k_start = (p.g.size() / 4) as f32;
+    (g, imap, k_start)
+}
 
+pub fn initial_param_independent_reduction(p: &mut ProblemInstance) {
     full_param_independent_reduction(p);
 
     // TODO: It would seem that merging steps above could potentially result in zero-edges in the
@@ -46,8 +53,6 @@ pub fn initial_param_independent_reduction(p: &mut ProblemInstance) -> f32 {
             }
         }
     }
-
-    k_start
 }
 
 pub fn param_dependent_reduction(p: &mut ProblemInstance) {
@@ -982,7 +987,8 @@ pub fn rule5(p: &mut ProblemInstance) -> bool {
 }
 
 fn min_cut(g: &GraphView<Weight>, c: &HashSet<usize>, a: usize) -> Weight {
-    let mut g = g.clone_graph();
+    let mut cloned_graph = g.cloned_graph();
+    let mut g = g.cloned_state().realize(&mut cloned_graph);
     let mut c = c.clone();
 
     fn merge_mc(g: &mut GraphView<Weight>, c: &mut HashSet<usize>, u: usize, v: usize) {

@@ -37,8 +37,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             .expect("input paths are valid UTF-8");
 
         let graph: PetGraph = parser::parse_file(&input)?;
-        let (graph, imap) = Graph::new_from_petgraph(&graph);
-        let graph = GraphView::new_from_graph(graph);
+        let (mut graph_storage, imap) = Graph::new_from_petgraph(&graph);
+        let graph = GraphView::new(&mut graph_storage);
         let (components, _) = graph.split_into_components();
 
         let before = graph.size();
@@ -46,10 +46,15 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         info!("Starting reduction on {}", filename);
 
+        drop(graph);
+
         for c in components.into_iter() {
             let params = cluster_editing::algo::Parameters::new(6, 2, HashMap::new(), None);
-            let mut instance =
-                cluster_editing::algo::ProblemInstance::new(&params, c, imap.clone());
+            let mut instance = cluster_editing::algo::ProblemInstance::new(
+                &params,
+                c.realize(&mut graph_storage),
+                imap.clone(),
+            );
             instance.k = f32::MAX;
             instance.k_max = f32::MAX;
             reduction::initial_param_independent_reduction(&mut instance);

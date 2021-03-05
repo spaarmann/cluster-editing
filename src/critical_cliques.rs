@@ -10,16 +10,18 @@ pub struct CritClique {
 
 pub struct CritCliqueGraph {
     pub cliques: Vec<CritClique>,
-    pub graph: GraphView<Weight>,
+    pub graph: Graph<Weight>,
 }
 
 impl CritCliqueGraph {
-    pub fn into_petgraph(&self) -> petgraph::Graph<String, u8, petgraph::Undirected, u32> {
+    pub fn into_petgraph(&mut self) -> petgraph::Graph<String, u8, petgraph::Undirected, u32> {
         use petgraph::prelude::NodeIndex;
 
-        let mut pg = petgraph::Graph::with_capacity(self.graph.size(), 0);
+        let g = GraphView::new(&mut self.graph);
 
-        for u in 0..self.graph.size() {
+        let mut pg = petgraph::Graph::with_capacity(g.size(), 0);
+
+        for u in 0..g.size() {
             pg.add_node(
                 self.cliques[u]
                     .vertices
@@ -30,9 +32,9 @@ impl CritCliqueGraph {
             );
         }
 
-        for u in 0..self.graph.size() {
-            for v in (u + 1)..self.graph.size() {
-                if self.graph.get(u, v) > Weight::ZERO {
+        for u in 0..g.size() {
+            for v in (u + 1)..g.size() {
+                if g.get(u, v) > Weight::ZERO {
                     pg.add_edge(NodeIndex::new(u), NodeIndex::new(v), 0);
                 }
             }
@@ -92,7 +94,7 @@ pub fn build_crit_clique_graph(g: &GraphView<Weight>) -> CritCliqueGraph {
 
     CritCliqueGraph {
         cliques,
-        graph: GraphView::new_from_graph(crit_graph),
+        graph: crit_graph,
     }
 }
 
@@ -112,22 +114,26 @@ fn should_be_neighbors(g: &GraphView<Weight>, c1: &CritClique, c2: &CritClique) 
 /// graph and merging all critical cliques into a single vertex.
 /// This assumes that the input graph is unweighted (i.e. all weights are +1 or -1 exactly). The
 /// reduced graph will be weighted however.
-pub fn merge_cliques(
-    g: &GraphView<Weight>,
+/// This returns a new graph and not just a view, all vertices in the graph should be considered
+/// valid.
+// TODO: Might be nicer if this just modified the existing graph through the view... oh well.
+pub fn merge_cliques<'g>(
+    g: &GraphView<'g, Weight>,
     imap: &IndexMap,
     _path_log: &mut String,
-) -> (GraphView<Weight>, IndexMap) {
+) -> (Graph<Weight>, IndexMap) {
     let mut crit = build_crit_clique_graph(g);
 
-    let mut crit_imap = IndexMap::empty(crit.graph.size());
+    let mut crit_graph = GraphView::new(&mut crit.graph);
+    let mut crit_imap = IndexMap::empty(crit_graph.size());
 
-    for u in 0..crit.graph.size() {
-        for v in (u + 1)..crit.graph.size() {
+    for u in 0..crit_graph.size() {
+        for v in (u + 1)..crit_graph.size() {
             //let uv = crit.graph.get_mut_direct(u, v);
-            let uv = crit.graph.get(u, v);
+            let uv = crit_graph.get(u, v);
             let sign = uv.signum();
             let weight = crit.cliques[u].vertices.len() * crit.cliques[v].vertices.len();
-            crit.graph.set(u, v, (weight as Weight) * sign);
+            crit_graph.set(u, v, (weight as Weight) * sign);
         }
 
         crit_imap.set(
@@ -607,9 +613,9 @@ mod tests {
         graph.set(5, 7, Weight::ONE);
         graph.set(5, 8, Weight::ONE);
 
-        let graph = GraphView::new_from_graph(graph);
+        let graph = GraphView::new(&mut graph);
 
-        let crit = build_crit_clique_graph(&graph);
+        let mut crit = build_crit_clique_graph(&graph);
 
         assert_eq!(crit.cliques[0].vertices, vec![0, 1]);
         assert_eq!(crit.cliques[1].vertices, vec![2]);
@@ -619,15 +625,16 @@ mod tests {
         assert_eq!(crit.cliques[5].vertices, vec![7]);
         assert_eq!(crit.cliques[6].vertices, vec![8]);
 
-        assert_eq!(crit.graph.neighbors(0).collect::<Vec<_>>(), vec![1]);
-        assert_eq!(crit.graph.neighbors(1).collect::<Vec<_>>(), vec![0, 2]);
-        assert_eq!(crit.graph.neighbors(2).collect::<Vec<_>>(), vec![1, 3, 4]);
+        let crit_graph = GraphView::new(&mut crit.graph);
+        assert_eq!(crit_graph.neighbors(0).collect::<Vec<_>>(), vec![1]);
+        assert_eq!(crit_graph.neighbors(1).collect::<Vec<_>>(), vec![0, 2]);
+        assert_eq!(crit_graph.neighbors(2).collect::<Vec<_>>(), vec![1, 3, 4]);
         assert_eq!(
-            crit.graph.neighbors(3).collect::<Vec<_>>(),
+            crit_graph.neighbors(3).collect::<Vec<_>>(),
             vec![2, 4, 5, 6]
         );
-        assert_eq!(crit.graph.neighbors(4).collect::<Vec<_>>(), vec![2, 3]);
-        assert_eq!(crit.graph.neighbors(5).collect::<Vec<_>>(), vec![3]);
-        assert_eq!(crit.graph.neighbors(6).collect::<Vec<_>>(), vec![3]);
+        assert_eq!(crit_graph.neighbors(4).collect::<Vec<_>>(), vec![2, 3]);
+        assert_eq!(crit_graph.neighbors(5).collect::<Vec<_>>(), vec![3]);
+        assert_eq!(crit_graph.neighbors(6).collect::<Vec<_>>(), vec![3]);
     }
 }

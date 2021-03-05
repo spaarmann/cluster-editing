@@ -93,7 +93,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         match spec.split_once(':') {
             None => error!("Format for --write-input not valid!"),
             Some((format, path)) => {
-                let graph = GraphView::new_from_graph(Graph::<Weight>::new_from_petgraph(&graph).0);
+                let mut graph_storage = Graph::<Weight>::new_from_petgraph(&graph).0;
+                let graph = GraphView::new(&mut graph_storage);
                 match format {
                     "tgf" => graph_writer::write_graph_tgf(&graph, None, path),
                     _ => error!("Unknown format for --write-input!"),
@@ -103,8 +104,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     if let Some(path) = opt.print_cliques {
-        let graph = GraphView::new_from_graph(Graph::new_from_petgraph(&graph).0);
-        let crit_graph = cluster_editing::critical_cliques::build_crit_clique_graph(&graph);
+        let mut graph_storage = Graph::<Weight>::new_from_petgraph(&graph).0;
+        let graph = GraphView::new(&mut graph_storage);
+        let mut crit_graph = cluster_editing::critical_cliques::build_crit_clique_graph(&graph);
         graphviz::print_graph(&opt.print_command, path, &crit_graph.into_petgraph());
     }
 
@@ -138,8 +140,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         match spec.split_once(':') {
             None => error!("Format for --write-output not valid!"),
             Some((format, path)) => {
-                let graph =
-                    GraphView::new_from_graph(Graph::<Weight>::new_from_petgraph(&result).0);
+                let mut graph_storage = Graph::<Weight>::new_from_petgraph(&result).0;
+                let graph = GraphView::new(&mut graph_storage);
                 match format {
                     "tgf" => graph_writer::write_graph_tgf(&graph, None, path),
                     _ => error!("Unknown format for --write-output!"),
