@@ -1035,7 +1035,6 @@ fn min_cut(g: &Graph<Weight>, c: &HashSet<usize>, a: usize) -> Weight {
 
 fn induced_cost_reduction(p: &mut ProblemInstance) {
     let mut u_neighbors = Vec::new();
-    let mut v_neighbors = Vec::new();
 
     for u in 0..p.g.size() {
         continue_if_not_present!(p.g, u);
@@ -1053,9 +1052,6 @@ fn induced_cost_reduction(p: &mut ProblemInstance) {
                 continue;
             }
 
-            v_neighbors.clear();
-            v_neighbors.extend(p.g.neighbors_with_weights(v));
-
             let mut icf = Weight::ZERO;
             let mut icp = Weight::ZERO;
 
@@ -1067,23 +1063,25 @@ fn induced_cost_reduction(p: &mut ProblemInstance) {
                     continue;
                 }
 
-                if let Some(&(_, vw)) = v_neighbors.iter().find(|&&(x, _)| w == x) {
+                let vw = p.g.get(v, w);
+                if vw > Weight::ZERO {
                     // w in intersection of neighborhoods.
                     icf += uw.min(vw);
                 } else {
                     // w in symmetric difference of neighborhoods.
-                    icp += uw.abs().min(p.g.get(v, w).abs());
+                    icp += uw.abs().min(vw.abs());
                 }
             }
-            for &(w, vw) in v_neighbors.iter() {
+            for (w, vw) in p.g.neighbors_with_weights(v) {
                 // TODO: This isn't in the paper, but I think it's correct? See above.
                 if w == u {
                     continue;
                 }
 
-                if let None = u_neighbors.iter().find(|&&(x, _)| w == x) {
+                let uw = p.g.get(u, w);
+                if uw <= Weight::ZERO {
                     // w in second part of symmetric difference of neighborhoods.
-                    icp += vw.abs().min(p.g.get(u, w).abs());
+                    icp += vw.abs().min(uw.abs());
                 }
             }
 
