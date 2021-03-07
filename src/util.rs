@@ -49,6 +49,21 @@ macro_rules! dbg_trace_indent {
     )
 }
 
+macro_rules! trace_and_path_log {
+    ($p:expr, $k:expr, $s:expr, $($arg:tt)+) => (
+        #[cfg(feature = "detailed-logs")]
+        {
+            log::log!(log::Level::Trace, concat!("{}[k={}]", $s),
+                "\t".repeat(($p.k_max - $k.max(0.0)) as usize),
+                $k, $($arg)+);
+        }
+        #[cfg(feature = "path-log")]
+        {
+            $p.path_log.push_str(&format!(concat!($s, "\n"), $($arg)+));
+        }
+    )
+}
+
 /// `continue_if_not_present(g, u)` executes a `continue` statement if vertex `u` is not present in
 /// Graph `g`.
 macro_rules! continue_if_not_present {

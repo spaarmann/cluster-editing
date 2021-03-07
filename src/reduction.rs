@@ -341,9 +341,7 @@ pub fn rules123(p: &mut ProblemInstance) -> bool {
         if let Some(&(u, v)) = edges_to_forbid.iter().next() {
             edges_to_forbid.remove(&(u, v));
 
-            append_path_log!(p, "rule1, forbidding {:?}-{:?}\n", p.imap[u], p.imap[v]);
-
-            dbg_trace_indent!(p, p.k, "rule1, forbidding {:?}-{:?}", p.imap[u], p.imap[v]);
+            trace_and_path_log!(p, p.k, "rule1, forbidding {:?}-{:?}", p.imap[u], p.imap[v]);
 
             debug_assert!(r.r1[u * p.g.size() + v] >= Weight::ZERO);
             debug_assert!(p.g.get(u, v) < Weight::ZERO);
@@ -386,8 +384,7 @@ pub fn rules123(p: &mut ProblemInstance) -> bool {
             edges_to_merge2.remove(&(u, v));
             edges_to_merge3.remove(&(u.min(v), u.max(v)));
 
-            append_path_log!(p, "rule2/3, merge {:?}-{:?}\n", p.imap[u], p.imap[v]);
-            dbg_trace_indent!(p, p.k, "rule2/3 merge {:?}-{:?}", p.imap[u], p.imap[v]);
+            trace_and_path_log!(p, p.k, "rule2/3 merge {:?}-{:?}", p.imap[u], p.imap[v]);
 
             debug_assert!(
                 r.r2[u * p.g.size() + v] >= Weight::ZERO
@@ -715,16 +712,13 @@ pub fn rule4(p: &mut ProblemInstance) -> bool {
             if k_c > sum_neg_internal + sum_pos_crossing {
                 for &v in &c {
                     if v != first {
-                        dbg_trace_indent!(
+                        trace_and_path_log!(
                             p,
                             p.k,
-                            "rule4 merge. first {:?} - v {:?}, edits so far {:?}",
+                            "rule4 merge. first {:?} - v {:?}",
                             p.imap[first],
-                            p.imap[v],
-                            p.edits
+                            p.imap[v]
                         );
-
-                        append_path_log!(p, "rule4, merge {:?}-{:?}\n", p.imap[first], p.imap[v]);
 
                         p.merge(first, v);
                     }
@@ -1097,19 +1091,10 @@ fn induced_cost_reduction(p: &mut ProblemInstance) {
             // causes e.g. a run on exact011 to go to k=85 instead of k=81, and then finish with
             // k=4 still left over :/
             if uv <= Weight::ZERO && icp + (-uv).max(Weight::ZERO) > p.k {
-                append_path_log!(
-                    p,
-                    "icp, forbid {:?}-{:?}, with icp {}, uv {} and k {}\n",
-                    p.imap[u],
-                    p.imap[v],
-                    icp,
-                    uv,
-                    p.k
-                );
-                dbg_trace_indent!(
+                trace_and_path_log!(
                     p,
                     p.k,
-                    "icp, forbid {:?}-{:?}, with icp {}, uv {} and k {}\n",
+                    "icp, forbid {:?}-{:?}, with icp {}, uv {} and k {}",
                     p.imap[u],
                     p.imap[v],
                     icp,
@@ -1131,19 +1116,10 @@ fn induced_cost_reduction(p: &mut ProblemInstance) {
                 continue;
             }
             if icf + uv.max(Weight::ZERO) > p.k {
-                append_path_log!(
-                    p,
-                    "icf, merge {:?}-{:?}, with icf {}, uv {} and k {}\n",
-                    p.imap[u],
-                    p.imap[v],
-                    icf,
-                    uv,
-                    p.k
-                );
-                dbg_trace_indent!(
+                trace_and_path_log!(
                     p,
                     p.k,
-                    "icf, merge {:?}-{:?}, with icf {}, uv {} and k {}\n",
+                    "icf, merge {:?}-{:?}, with icf {}, uv {} and k {}",
                     p.imap[u],
                     p.imap[v],
                     icf,
