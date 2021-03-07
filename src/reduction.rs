@@ -1088,7 +1088,9 @@ fn induced_cost_reduction(p: &mut ProblemInstance) {
             // TODO: It seems the first condition should not be necessary, but not having it
             // causes e.g. a run on exact011 to go to k=85 instead of k=81, and then finish with
             // k=4 still left over :/
-            if uv <= Weight::ZERO && icp + (-uv).max(Weight::ZERO) > p.k {
+            if
+            /*uv <= Weight::ZERO &&*/
+            icp + (-uv).max(Weight::ZERO) > p.k {
                 trace_and_path_log!(
                     p,
                     p.k,
