@@ -57,10 +57,10 @@ struct Opt {
     #[structopt(long = "print-command", default_value = "sfdp")]
     print_command: String,
 
-    #[structopt(long = "full-reduction-interval", default_value = "6")]
+    #[structopt(long = "full-reduction-interval", default_value = "50")]
     full_reduction_interval: i32,
 
-    #[structopt(long = "fast-reduction-interval", default_value = "2")]
+    #[structopt(long = "fast-reduction-interval", default_value = "200")]
     fast_reduction_interval: i32,
 
     /// If specified, various statistics will be written into files in the given directory.
