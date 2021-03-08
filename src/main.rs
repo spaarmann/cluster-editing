@@ -31,7 +31,7 @@ struct Opt {
 
     /// Writes the input graph file out in another format.
     /// Syntax: `--write-input <format>:<path>.
-    /// Supported formats are: `tgf`.
+    /// Supported formats are: `tgf`, `peace`.
     #[structopt(long = "write-input")]
     write_input: Option<String>,
 
@@ -94,6 +94,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let (graph, _) = Graph::<Weight>::new_from_petgraph(&graph);
                 match format {
                     "tgf" => graph_writer::write_graph_tgf(&graph, None, path),
+                    "peace" => graph_writer::write_graph_peace(&graph, None, path),
                     _ => error!("Unknown format for --write-input!"),
                 }
             }
