@@ -5,6 +5,7 @@ use cluster_editing::{algo, graph_writer, graphviz, parser, Graph, PetGraph, Wei
 use std::collections::HashMap;
 use std::error::Error;
 use std::path::PathBuf;
+use std::time::Instant;
 
 use log::{error, info};
 use structopt::StructOpt;
@@ -78,10 +79,20 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let opt = Opt::from_args();
 
+    let input_name;
+
     let graph: PetGraph = match opt.input {
-        Some(path) => parser::parse_file(path),
-        None => parser::parse(std::io::stdin().lock()),
+        Some(path) => {
+            input_name = path.display().to_string();
+            parser::parse_file(path)
+        }
+        None => {
+            input_name = "stdin".to_string();
+            parser::parse(std::io::stdin().lock())
+        }
     }?;
+
+    info!("Taking input graph from {}", input_name);
 
     if let Some(path) = opt.print_input {
         graphviz::print_graph(&opt.print_command, path, &graph);
@@ -119,9 +130,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         opt.stats_dir,
     );
 
-    info!("Running with debug options: {:?}", params.debug_opts);
+    info!("Running with parameters: {:?}", params);
+
+    let start = Instant::now();
 
     let result = algo::execute_algorithm(&graph, params);
+
+    let time = start.elapsed().as_secs_f32();
+
+    info!("Finished in {} seconds!", time);
 
     info!(
         "Output graph has {} nodes and {} edges.",
