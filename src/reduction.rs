@@ -717,21 +717,6 @@ pub fn rule4(p: &mut ProblemInstance) -> bool {
 
             if k_c > sum_neg_internal + sum_pos_crossing {
                 for &v in &c {
-                    if v == first {
-                        continue;
-                    }
-                    if p.g.get(first, v) < Weight::ZERO {
-                        log::error!(
-                            "Rule4 computed a non-edge to merge! {}-{} / {:?}-{:?}",
-                            first,
-                            v,
-                            p.imap[first],
-                            p.imap[v]
-                        );
-                    }
-                }
-
-                for &v in &c {
                     if v != first {
                         trace_and_path_log!(
                             p,

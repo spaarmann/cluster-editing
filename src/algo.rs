@@ -681,10 +681,15 @@ impl<'a> ProblemInstance<'a> {
     pub fn merge(&mut self, u: usize, v: usize) {
         assert!(self.g.is_present(u));
         assert!(self.g.is_present(v));
-        assert!(self.g.get(u, v) >= Weight::ZERO);
 
         let _start_k = self.k;
         let _start_edit_len = self.edits.len();
+
+        let uv = self.g.get(u, v);
+        if uv < Weight::ZERO {
+            self.k += uv; // We essentially add the edge if it doesn't exist, which generates cost.
+            Edit::insert(&mut self.edits, &self.imap, u, v);
+        }
 
         for w in 0..self.g.size() {
             if w == u || w == v || !self.g.is_present(w) {
