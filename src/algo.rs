@@ -108,6 +108,10 @@ pub fn execute_algorithm(graph: &PetGraph, mut params: Parameters) -> PetGraph {
             write_stat_initial(&stats_dir, &params.stats.borrow(), i);
         }
 
+        if cg.nodes().any(|v| imap[v][0] == 66) {
+            crate::graphviz::print_debug_graph("sfdp", "comp.png", &cg.into_petgraph(Some(&imap)));
+        }
+
         info!("Solving component {}...", i);
         let (k, edits) = find_optimal_cluster_editing(&cg, &imap, &params, i);
 
@@ -145,16 +149,12 @@ pub fn execute_algorithm(graph: &PetGraph, mut params: Parameters) -> PetGraph {
             if result.find_edge(u, v).is_none() {
                 continue;
             }
-            /*if !self.g.has_edge(u, v) {
-                continue;
-            }*/
 
             for w in result.node_indices() {
                 if v == w || u == w {
                     continue;
                 }
 
-                //if self.g.has_edge(u, w) && !self.g.has_edge(v, w) {
                 if result.find_edge(u, w).is_some() && result.find_edge(v, w).is_none() {
                     // `vuw` is a conflict triple!
                     panic!(
@@ -686,7 +686,7 @@ impl<'a> ProblemInstance<'a> {
         let _start_edit_len = self.edits.len();
 
         let uv = self.g.get(u, v);
-        if uv < Weight::ZERO {
+        if uv <= Weight::ZERO {
             self.k += uv; // We essentially add the edge if it doesn't exist, which generates cost.
             Edit::insert(&mut self.edits, &self.imap, u, v);
         }
