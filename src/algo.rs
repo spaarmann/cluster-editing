@@ -108,10 +108,6 @@ pub fn execute_algorithm(graph: &PetGraph, mut params: Parameters) -> PetGraph {
             write_stat_initial(&stats_dir, &params.stats.borrow(), i);
         }
 
-        if cg.nodes().any(|v| imap[v][0] == 66) {
-            crate::graphviz::print_debug_graph("sfdp", "comp.png", &cg.into_petgraph(Some(&imap)));
-        }
-
         info!("Solving component {}...", i);
         let (k, edits) = find_optimal_cluster_editing(&cg, &imap, &params, i);
 
