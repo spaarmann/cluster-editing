@@ -6,7 +6,13 @@ use crate::{
     Graph, Weight,
 };
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::BTreeSet;
+
+// This hash set is deterministic, unlike the `std` one. That means the same sequence
+// of modifications will result in the same state, including iteration order.
+// This isn't critical for correctness here, but it's useful to avoid results randomly
+// fluctuating because of internal randomness.
+use rustc_hash::FxHashSet;
 
 #[derive(Clone, Debug, Default)]
 pub struct ReductionStorage {
@@ -627,7 +633,7 @@ pub fn rule4(p: &mut ProblemInstance) -> bool {
     // TODO: Think through if this doesn't do weird things if we already set some non-edges to
     // NEG_INFINITY
     // TODO: Comment this stuff (including MinCut) and probably clean it up a bit ^^'
-    let mut c = HashSet::new();
+    let mut c = FxHashSet::default();
 
     // Choose initial u
     let (mut first, mut max) = (usize::MAX, Weight::NEG_INFINITY);
@@ -990,11 +996,11 @@ pub fn rule5(p: &mut ProblemInstance) -> bool {
     applied
 }
 
-fn min_cut(g: &Graph<Weight>, c: &HashSet<usize>, a: usize) -> Weight {
+fn min_cut(g: &Graph<Weight>, c: &FxHashSet<usize>, a: usize) -> Weight {
     let mut g = g.clone();
     let mut c = c.clone();
 
-    fn merge_mc(g: &mut Graph<Weight>, c: &mut HashSet<usize>, u: usize, v: usize) {
+    fn merge_mc(g: &mut Graph<Weight>, c: &mut FxHashSet<usize>, u: usize, v: usize) {
         for &w in c.iter() {
             if w == u || w == v {
                 continue;
@@ -1009,8 +1015,8 @@ fn min_cut(g: &Graph<Weight>, c: &HashSet<usize>, a: usize) -> Weight {
         c.remove(&v);
     }
 
-    fn min_cut_phase(g: &mut Graph<Weight>, c: &mut HashSet<usize>, a: usize) -> Weight {
-        let mut set = HashSet::new();
+    fn min_cut_phase(g: &mut Graph<Weight>, c: &mut FxHashSet<usize>, a: usize) -> Weight {
+        let mut set = FxHashSet::default();
         set.insert(a);
         let mut last_two = (a, 0);
         while &set != c {
