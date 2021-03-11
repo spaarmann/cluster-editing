@@ -1042,8 +1042,12 @@ fn min_cut(g: &Graph<Weight>, c: &FxHashSet<usize>, a: usize) -> Weight {
 fn induced_cost_reduction(p: &mut ProblemInstance) {
     let mut u_neighbors = Vec::new();
 
-    for u in 0..p.g.size() {
-        continue_if_not_present!(p.g, u);
+    let mut u = 0;
+    'outer: while u < p.g.size() {
+        if !p.g.is_present(u) {
+            u += 1;
+            continue;
+        }
 
         u_neighbors.clear();
         u_neighbors.extend(p.g.neighbors_with_weights(u));
@@ -1091,12 +1095,7 @@ fn induced_cost_reduction(p: &mut ProblemInstance) {
                 }
             }
 
-            // TODO: It seems the first condition should not be necessary, but not having it
-            // causes e.g. a run on exact011 to go to k=85 instead of k=81, and then finish with
-            // k=4 still left over :/
-            if
-            /*uv <= Weight::ZERO &&*/
-            icp + (-uv).max(Weight::ZERO) > p.k {
+            if icp + (-uv).max(Weight::ZERO) > p.k {
                 trace_and_path_log!(
                     p,
                     p.k,
@@ -1119,7 +1118,14 @@ fn induced_cost_reduction(p: &mut ProblemInstance) {
                     return;
                 }
 
-                continue;
+                // We changed the graph, so we may have invalidated u_neighbors.
+                // We could just continue 'outer, but we'd possibly leave reduction
+                // on the table if there is another v where u-v is applicable.
+                // This way we recalculate u_neighbors, but still go through all v's
+                // again.
+                // TODO: Investigate if this is worth it for performance, or a pure continue
+                // ends up being better.
+                continue 'outer;
             }
             if icf + uv.max(Weight::ZERO) > p.k {
                 trace_and_path_log!(
@@ -1145,8 +1151,11 @@ fn induced_cost_reduction(p: &mut ProblemInstance) {
                     return;
                 }
 
-                continue;
+                // See above.
+                continue 'outer;
             }
         }
+
+        u += 1;
     }
 }
