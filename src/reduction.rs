@@ -1143,12 +1143,6 @@ fn induced_cost_reduction(p: &mut ProblemInstance) {
                     p.k
                 );
 
-                if uv < Weight::ZERO {
-                    p.k += uv;
-                    p.g.set(u, v, Weight::ZERO);
-                    Edit::insert(&mut p.edits, &p.imap, u, v);
-                }
-
                 p.merge(u, v);
 
                 if p.k <= 0.0 {
