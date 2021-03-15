@@ -89,6 +89,10 @@ pub fn execute_algorithm(graph: &PetGraph, mut params: Parameters) -> PetGraph {
     let (g, imap) = Graph::<Weight>::new_from_petgraph(&graph);
     let (components, _) = g.split_into_components(&imap);
 
+    /*unsafe {
+        original_input_graph = Some(graph.clone());
+    }*/
+
     info!(
         "Decomposed input graph into {} components",
         components.len()
@@ -201,6 +205,67 @@ pub fn execute_algorithm(graph: &PetGraph, mut params: Parameters) -> PetGraph {
     );
     result
 }
+
+// A bit of code that can be useful for debugging, so I'm leaving it here
+// commented out for now.
+// When using it, remember to also comment in the line further up that sets
+// the static.
+/*static mut original_input_graph: Option<PetGraph> = None;
+fn print_current_deduplicated_edits(p: &mut ProblemInstance) {
+    let mut result = unsafe { original_input_graph.as_ref().unwrap().clone() };
+
+    for &edit in &p.edits {
+        match edit {
+            Edit::Insert(u, v) => {
+                if let None = result.find_edge(NodeIndex::new(u), NodeIndex::new(v)) {
+                    result.add_edge(NodeIndex::new(u), NodeIndex::new(v), 0);
+                }
+            }
+            Edit::Delete(u, v) => {
+                if let Some(e) = result.find_edge(NodeIndex::new(u), NodeIndex::new(v)) {
+                    result.remove_edge(e);
+                }
+            }
+        };
+    }
+
+    let mut edits = Vec::new();
+    let graph = unsafe { original_input_graph.as_ref().unwrap() };
+    for u in graph.node_indices() {
+        for v in graph.node_indices() {
+            if u == v {
+                continue;
+            }
+            if v > u {
+                continue;
+            }
+
+            let original = graph.find_edge(u, v);
+            let new = result.find_edge(u, v);
+
+            match (original, new) {
+                (None, Some(_)) => edits.push(Edit::Insert(
+                    *graph.node_weight(u).unwrap(),
+                    *graph.node_weight(v).unwrap(),
+                )),
+                (Some(_), None) => edits.push(Edit::Delete(
+                    *graph.node_weight(u).unwrap(),
+                    *graph.node_weight(v).unwrap(),
+                )),
+                _ => { /* no edit */ }
+            }
+        }
+    }
+
+    trace_and_path_log!(
+        p,
+        p.k,
+        "With k={} currently {} dedup'd edits: {:?}",
+        p.k,
+        edits.len(),
+        edits
+    );
+}*/
 
 // The imap is used to always have a mapping from the current indices used by the graph to
 // what indices those vertices have in the original graph.
@@ -470,14 +535,13 @@ impl<'a> ProblemInstance<'a> {
                 }
             }
 
-            dbg_trace_indent!(
+            trace_and_path_log!(
                 self,
                 _k_start,
                 "Reduced from k={} to k={}",
                 _k_start,
                 self.k
             );
-            append_path_log!(self, "Reduced from k={} to k={}\n", _k_start, self.k);
         }
 
         if self.k < 0.0 {
@@ -632,20 +696,12 @@ impl<'a> ProblemInstance<'a> {
             let uv = this.g.get(u, v);
             // TODO: Might not need this check after edge merging is in? Maybe?
             if uv.is_finite() {
-                append_path_log!(
-                    this,
-                    "Branch: Merge {:?}-{:?}, k after merging: {} !\n",
-                    this.imap[u],
-                    this.imap[v],
-                    this.k
-                );
-
                 let _imap_u = this.imap[u].clone();
                 let _imap_v = this.imap[v].clone();
                 this.merge(u, v);
 
                 if this.k >= 0.0 {
-                    dbg_trace_indent!(
+                    trace_and_path_log!(
                         this,
                         _k_start,
                         "Branch: Merge {:?}-{:?}, k after merging: {} !",
@@ -682,8 +738,12 @@ impl<'a> ProblemInstance<'a> {
         let _start_edit_len = self.edits.len();
 
         let uv = self.g.get(u, v);
-        if uv <= Weight::ZERO {
+        if uv < Weight::ZERO {
             self.k += uv; // We essentially add the edge if it doesn't exist, which generates cost.
+            Edit::insert(&mut self.edits, &self.imap, u, v);
+        }
+        if uv.abs() < 0.0001 {
+            self.k -= 0.5;
             Edit::insert(&mut self.edits, &self.imap, u, v);
         }
 
@@ -737,7 +797,7 @@ impl<'a> ProblemInstance<'a> {
             }
         }
 
-        dbg_trace_indent!(
+        trace_and_path_log!(
             self,
             _start_k,
             "Merged {:?} and {:?}. k was {}, is now {}. New edits: {:?}",
