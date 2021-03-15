@@ -71,3 +71,43 @@ pub fn write_graph_peace<T: GraphWeight + Display, P: AsRef<Path>>(
 
     writer.flush().unwrap();
 }
+
+pub fn write_graph_gr<T: GraphWeight + Display, P: AsRef<Path>>(g: &Graph<T>, path: P) {
+    let file = File::create(path).unwrap();
+    let mut writer = BufWriter::new(file);
+
+    writeln!(
+        writer,
+        "p cep {} {}",
+        g.present_node_count(),
+        g.edge_count()
+    )
+    .unwrap();
+
+    let mut node_map = vec![-1; g.size()];
+    let mut next_node_idx = 1;
+
+    for u in g.nodes() {
+        if node_map[u] == -1 {
+            node_map[u] = next_node_idx;
+            next_node_idx += 1;
+        }
+
+        for v in (u + 1)..g.size() {
+            continue_if_not_present!(g, v);
+
+            if node_map[v] == -1 {
+                node_map[v] = next_node_idx;
+                next_node_idx += 1;
+            }
+
+            let uv = g.get(u, v);
+
+            if uv > T::ZERO {
+                writeln!(writer, "{} {}", node_map[u], node_map[v]).unwrap();
+            }
+        }
+    }
+
+    writer.flush().unwrap();
+}

@@ -101,6 +101,12 @@ pub fn execute_algorithm(graph: &PetGraph, mut params: Parameters) -> PetGraph {
     for (i, c) in components.into_iter().enumerate() {
         let (cg, imap) = c;
 
+        if let Some(only_comp) = params.debug_opts.get("only_comp") {
+            if i != only_comp.parse().unwrap() {
+                continue;
+            }
+        }
+
         if params.stats_dir.is_some() {
             let mut comp_statistics = ComponentStatistics::default();
             comp_statistics.component_node_count = cg.present_node_count();

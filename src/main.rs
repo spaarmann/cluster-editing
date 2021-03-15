@@ -32,7 +32,7 @@ struct Opt {
 
     /// Writes the input graph file out in another format.
     /// Syntax: `--write-input <format>:<path>.
-    /// Supported formats are: `tgf`, `peace`.
+    /// Supported formats are: `tgf`, `peace`, `gr`.
     #[structopt(long = "write-input")]
     write_input: Option<String>,
 
@@ -43,7 +43,7 @@ struct Opt {
 
     /// Writes the output graph file out in another format.
     /// Syntax: `--write-output <format>:<path>.
-    /// Supported formats are: `tgf`.
+    /// Supported formats are: `tgf`, `peace`, `gr.
     #[structopt(long = "write-output")]
     write_output: Option<String>,
 
@@ -99,17 +99,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     if let Some(spec) = opt.write_input {
-        match spec.split_once(':') {
-            None => error!("Format for --write-input not valid!"),
-            Some((format, path)) => {
-                let (graph, _) = Graph::<Weight>::new_from_petgraph(&graph);
-                match format {
-                    "tgf" => graph_writer::write_graph_tgf(&graph, None, path),
-                    "peace" => graph_writer::write_graph_peace(&graph, None, path),
-                    _ => error!("Unknown format for --write-input!"),
-                }
-            }
-        }
+        write_graph(&Graph::<Weight>::new_from_petgraph(&graph).0, &spec);
     }
 
     if let Some(path) = opt.print_cliques {
@@ -151,16 +141,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     if let Some(spec) = opt.write_output {
-        match spec.split_once(':') {
-            None => error!("Format for --write-output not valid!"),
-            Some((format, path)) => {
-                let (graph, _) = Graph::<Weight>::new_from_petgraph(&result);
-                match format {
-                    "tgf" => graph_writer::write_graph_tgf(&graph, None, path),
-                    _ => error!("Unknown format for --write-output!"),
-                }
-            }
-        }
+        write_graph(&Graph::<Weight>::new_from_petgraph(&result).0, &spec);
     }
     Ok(())
 }
@@ -178,4 +159,16 @@ where
         .find('=')
         .ok_or_else(|| format!("invalid key=value pair: no `=` found in `{}`", s))?;
     Ok((s[..pos].parse()?, s[pos + 1..].parse()?))
+}
+
+fn write_graph(graph: &Graph<Weight>, spec: &str) {
+    match spec.split_once(':') {
+        None => error!("Format for --write-input or --write-output not valid!"),
+        Some((format, path)) => match format {
+            "tgf" => graph_writer::write_graph_tgf(graph, None, path),
+            "peace" => graph_writer::write_graph_peace(graph, None, path),
+            "gr" => graph_writer::write_graph_gr(graph, path),
+            _ => error!("Unknown format for --write-input!"),
+        },
+    }
 }
