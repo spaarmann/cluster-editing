@@ -92,6 +92,7 @@ impl<T: GraphWeight> Graph<T> {
     pub fn into_petgraph(
         &self,
         imap: Option<&IndexMap>,
+        inverted_graph: bool,
     ) -> petgraph::Graph<Vec<usize>, T, petgraph::Undirected> {
         use petgraph::prelude::NodeIndex;
 
@@ -109,7 +110,7 @@ impl<T: GraphWeight> Graph<T> {
                 for v in (u + 1)..self.size {
                     if self.present[v] {
                         let uv = self.get(u, v);
-                        if uv > T::ZERO {
+                        if (!inverted_graph && uv > T::ZERO) || (inverted_graph && uv <= T::ZERO) {
                             pg.add_edge(map[u], map[v], uv);
                         }
                     }
