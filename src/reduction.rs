@@ -1,9 +1,5 @@
 use crate::{
-    algo::{Edit, ProblemInstance},
-    critical_cliques,
-    graph::GraphWeight,
-    util::InfiniteNum,
-    Graph, Weight,
+    algo::ProblemInstance, critical_cliques, graph::GraphWeight, util::InfiniteNum, Graph, Weight,
 };
 
 use std::collections::BTreeSet;
@@ -1113,7 +1109,6 @@ fn induced_cost_reduction(p: &mut ProblemInstance) {
                 }
                 if uv.abs() < 0.001 {
                     p.k -= 0.5;
-                    p.make_delete_edit(u, v);
                 }
 
                 p.g.set(u, v, Weight::NEG_INFINITY);
