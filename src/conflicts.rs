@@ -1,5 +1,7 @@
 use crate::graph::{Graph, GraphWeight};
 
+use std::ops::Not;
+
 /// Effeciently maintains a collection of conflict triples (nodes v-u-w where uv and uw are edges,
 /// but vw is a non-edge).
 ///
@@ -102,6 +104,9 @@ impl ConflictStore {
             let xuy_idx = self.idx(x, u, y);
             let yux_idx = self.idx(y, u, x);
             if self.conflict_store[xuy_idx] {
+                debug_assert!(self.conflict_store[xuy_idx]);
+                debug_assert!(self.conflict_store[yux_idx]);
+
                 self.conflict_count -= 1;
                 self.conflict_store[xuy_idx] = false;
                 self.conflict_store[yux_idx] = false;
@@ -111,15 +116,23 @@ impl ConflictStore {
             let uy = g.has_edge(u, y);
 
             if !ux && uy {
-                self.conflict_count += 1;
                 let xyu_idx = self.idx(x, y, u);
                 let uyx_idx = self.idx(u, y, x);
+
+                debug_assert!(self.conflict_store[xyu_idx].not());
+                debug_assert!(self.conflict_store[uyx_idx].not());
+
+                self.conflict_count += 1;
                 self.conflict_store[xyu_idx] = true;
                 self.conflict_store[uyx_idx] = true;
             } else if ux && !uy {
-                self.conflict_count += 1;
                 let yxu_idx = self.idx(y, x, u);
                 let uxy_idx = self.idx(u, x, y);
+
+                debug_assert!(self.conflict_store[yxu_idx].not());
+                debug_assert!(self.conflict_store[uxy_idx].not());
+
+                self.conflict_count += 1;
                 self.conflict_store[yxu_idx] = true;
                 self.conflict_store[uxy_idx] = true;
             }
@@ -142,11 +155,17 @@ impl ConflictStore {
             let yxu_idx = self.idx(y, x, u);
             let uxy_idx = self.idx(u, x, y);
             if self.conflict_store[xyu_idx] {
+                debug_assert!(self.conflict_store[xyu_idx]);
+                debug_assert!(self.conflict_store[uyx_idx]);
+
                 self.conflict_count -= 1;
                 self.conflict_store[xyu_idx] = false;
                 self.conflict_store[uyx_idx] = false;
             }
             if self.conflict_store[yxu_idx] {
+                debug_assert!(self.conflict_store[yxu_idx]);
+                debug_assert!(self.conflict_store[uxy_idx]);
+
                 self.conflict_count -= 1;
                 self.conflict_store[yxu_idx] = false;
                 self.conflict_store[uxy_idx] = false;
@@ -156,9 +175,13 @@ impl ConflictStore {
             let uy = g.has_edge(u, y);
 
             if ux && uy {
-                self.conflict_count += 1;
                 let xuy_idx = self.idx(x, u, y);
                 let yux_idx = self.idx(y, u, x);
+
+                debug_assert!(self.conflict_store[xuy_idx].not());
+                debug_assert!(self.conflict_store[yux_idx].not());
+
+                self.conflict_count += 1;
                 self.conflict_store[xuy_idx] = true;
                 self.conflict_store[yux_idx] = true;
             }
@@ -184,25 +207,37 @@ impl ConflictStore {
 
                 let uxv_idx = self.idx(u, x, v);
                 if self.conflict_store[uxv_idx] {
+                    let vxu_idx = self.idx(v, x, u);
+
+                    debug_assert!(self.conflict_store[uxv_idx]);
+                    debug_assert!(self.conflict_store[vxu_idx]);
+
                     self.conflict_count -= 1;
                     self.conflict_store[uxv_idx] = false;
-                    let vxu_idx = self.idx(v, x, u);
                     self.conflict_store[vxu_idx] = false;
                 }
 
                 let xuv_idx = self.idx(x, u, v);
                 if self.conflict_store[xuv_idx] {
+                    let vux_idx = self.idx(v, u, x);
+
+                    debug_assert!(self.conflict_store[xuv_idx]);
+                    debug_assert!(self.conflict_store[vux_idx]);
+
                     self.conflict_count -= 1;
                     self.conflict_store[xuv_idx] = false;
-                    let vux_idx = self.idx(v, u, x);
                     self.conflict_store[vux_idx] = false;
                 }
 
                 let xvu_idx = self.idx(x, v, u);
                 if self.conflict_store[xvu_idx] {
+                    let uvx_idx = self.idx(u, v, x);
+
+                    debug_assert!(self.conflict_store[xvu_idx]);
+                    debug_assert!(self.conflict_store[uvx_idx]);
+
                     self.conflict_count -= 1;
                     self.conflict_store[xvu_idx] = false;
-                    let uvx_idx = self.idx(u, v, x);
                     self.conflict_store[uvx_idx] = false;
                 }
             }
@@ -235,7 +270,10 @@ impl ConflictStore {
             }
         }
 
-        unreachable!();
+        panic!(
+            "Did not find a conflict, but conflict_count is {}",
+            self.conflict_count
+        );
     }
 
     #[inline(always)]
