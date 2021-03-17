@@ -4,6 +4,7 @@
 pub mod util;
 
 pub mod algo;
+pub mod conflicts;
 pub mod critical_cliques;
 pub mod graph;
 pub mod graph_writer;

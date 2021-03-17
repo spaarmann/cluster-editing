@@ -1,4 +1,5 @@
 use crate::{
+    conflicts::ConflictStore,
     graph::{GraphWeight, IndexMap},
     reduction,
     util::{FloatKey, InfiniteNum},
@@ -297,6 +298,11 @@ pub fn find_optimal_cluster_editing(
     let mut instance = ProblemInstance::new(params, g.clone(), imap.clone());
     let k_start = reduction::initial_param_independent_reduction(&mut instance);
 
+    // `initial_param_independent_reduction` currently actually replaces the graph with
+    // a completely new one. This isn't a great state of affair, it incurs a good amount
+    // of unnecessary overhead, but it only happens once per component, so, eh.
+    instance.conflicts = ConflictStore::new_for_graph(&instance.g);
+
     info!(
         "Reduced graph from {} nodes to {} nodes using parameter-independent reduction.",
         original_node_count,
@@ -346,10 +352,11 @@ pub fn find_optimal_cluster_editing(
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ProblemInstance<'a> {
     pub params: &'a Parameters,
     pub g: Graph<Weight>,
+    pub conflicts: ConflictStore,
     pub imap: IndexMap,
     pub k: f32,
     pub k_max: f32,
@@ -363,10 +370,12 @@ pub struct ProblemInstance<'a> {
 
 impl<'a> ProblemInstance<'a> {
     pub fn new(params: &'a Parameters, g: Graph<Weight>, imap: IndexMap) -> Self {
+        let conflicts = ConflictStore::new_for_graph(&g);
         Self {
             params,
             g,
             imap,
+            conflicts,
             k: 0.0,
             k_max: 0.0,
             full_reduction_counter: 0,
@@ -385,12 +394,14 @@ impl<'a> ProblemInstance<'a> {
     // `k` is stored as float because it needs to be compared with and changed by values from
     // the WeightMap a lot, which are floats.
     fn find_cluster_editing(mut self) -> (bool, Self) {
-        // If k is already 0, we can only succeed if we currently have a solution; there is no point in trying
-        // to do further reductions or splitting as we can't afford any edits anyway.
         let _k_start = self.k;
 
+        // If k is already 0, we can only succeed if we currently have a solution; there is no point in trying
+        // to do further reductions or splitting as we can't afford any edits anyway.
         if self.k > 0.0 {
-            /*let (components, component_map) = self.g.split_into_components(&self.imap);
+            /*
+            TODO: The component splitting code was not updated for conflict tracking yet.
+            let (components, component_map) = self.g.split_into_components(&self.imap);
             if components.len() > 1 {
                 // If a connected component decomposes into two components, we calculate
                 // the optimum solution for these components separately.
@@ -558,7 +569,7 @@ impl<'a> ProblemInstance<'a> {
 
         // Search for a conflict triple
         // TODO: Surely this can be done a little smarter?
-        let mut triple = None;
+        /*let mut triple = None;
         'outer: for u in self.g.nodes() {
             for v in self.g.nodes() {
                 if u == v {
@@ -581,7 +592,8 @@ impl<'a> ProblemInstance<'a> {
                     }
                 }
             }
-        }
+        }*/
+        let triple = self.conflicts.get_next_conflict();
 
         let (v, u, _w) = match triple {
             None => {
@@ -637,6 +649,7 @@ impl<'a> ProblemInstance<'a> {
         let oplog_len = self.g.oplog_len();
         let path_len = self.path_log.len();
         let prev_imap = self.imap.clone();
+        let prev_conflicts = self.conflicts.clone();
         let prev_k = self.k;
         let prev_full_counter = self.full_reduction_counter;
         let prev_fast_counter = self.fast_reduction_counter;
@@ -666,8 +679,8 @@ impl<'a> ProblemInstance<'a> {
                         self.k
                     );
 
-                    Edit::delete(&mut self.edits, &self.imap, u, v);
                     self.g.set(u, v, InfiniteNum::NEG_INFINITY);
+                    self.make_delete_edit(u, v);
 
                     self.find_cluster_editing()
                 } else {
@@ -693,6 +706,7 @@ impl<'a> ProblemInstance<'a> {
         this.g.rollback_to(oplog_len);
         this.path_log.truncate(path_len);
         this.imap = prev_imap;
+        this.conflicts = prev_conflicts;
         this.k = prev_k;
         this.full_reduction_counter = prev_full_counter;
         this.fast_reduction_counter = prev_fast_counter;
@@ -734,6 +748,19 @@ impl<'a> ProblemInstance<'a> {
         res2
     }
 
+    // These two methods create appropriate `Edit` entries and update the conflict store,
+    // anything that calls them is still responsible for updating `k` appropriately.
+    // (And also for actually setting any values in the graph.)
+
+    pub fn make_insert_edit(&mut self, u: usize, v: usize) {
+        Edit::insert(&mut self.edits, &self.imap, u, v);
+        self.conflicts.update_for_insert(&self.g, u, v);
+    }
+    pub fn make_delete_edit(&mut self, u: usize, v: usize) {
+        Edit::delete(&mut self.edits, &self.imap, u, v);
+        self.conflicts.update_for_delete(&self.g, u, v);
+    }
+
     /// Merge u and v. The merged vertex becomes the new vertex at index u in the graph, while v is
     /// marked as not present anymore.
     pub fn merge(&mut self, u: usize, v: usize) {
@@ -746,11 +773,11 @@ impl<'a> ProblemInstance<'a> {
         let uv = self.g.get(u, v);
         if uv < Weight::ZERO {
             self.k += uv; // We essentially add the edge if it doesn't exist, which generates cost.
-            Edit::insert(&mut self.edits, &self.imap, u, v);
+            self.make_insert_edit(u, v);
         }
         if uv.abs() < 0.0001 {
             self.k -= 0.5;
-            Edit::insert(&mut self.edits, &self.imap, u, v);
+            self.make_insert_edit(u, v);
         }
 
         for w in 0..self.g.size() {
@@ -772,7 +799,7 @@ impl<'a> ProblemInstance<'a> {
                 } else {
                     // (+, 0)
                     self.k -= 0.5;
-                    Edit::insert(&mut self.edits, &self.imap, v, w);
+                    self.make_insert_edit(v, w);
                 }
             } else if uw < Weight::ZERO {
                 if vw < Weight::ZERO {
@@ -795,7 +822,7 @@ impl<'a> ProblemInstance<'a> {
                     // (0, +)
                     self.k -= 0.5;
                     self.g.set(u, w, vw);
-                    Edit::insert(&mut self.edits, &self.imap, u, w);
+                    self.make_insert_edit(u, w);
                 } else {
                     // (0, 0)
                     self.k -= 0.5;
@@ -817,6 +844,7 @@ impl<'a> ProblemInstance<'a> {
         self.g.set_not_present(v);
         let mut imap_v = self.imap.take(v);
         self.imap[u].append(&mut imap_v);
+        self.conflicts.update_for_not_present(&self.g, v);
     }
 
     // `merge` helper. Merge uw and vw, under the assumption that weight(uw) > 0 and weight(vw) < 0.
@@ -828,15 +856,15 @@ impl<'a> ProblemInstance<'a> {
 
         if (uw + vw).is_zero() {
             self.k -= uw as f32 - 0.5;
-            Edit::delete(&mut self.edits, &self.imap, u, w);
+            self.make_delete_edit(u, w);
             return Weight::ZERO;
         } else {
             if uw > -vw {
                 self.k -= -vw as f32;
-                Edit::insert(&mut self.edits, &self.imap, v, w);
+                self.make_insert_edit(v, w);
             } else {
                 self.k -= uw as f32;
-                Edit::delete(&mut self.edits, &self.imap, u, w);
+                self.make_delete_edit(u, w);
             }
             return uw + vw;
         }

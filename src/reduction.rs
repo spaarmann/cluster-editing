@@ -1109,11 +1109,11 @@ fn induced_cost_reduction(p: &mut ProblemInstance) {
 
                 if uv > Weight::ZERO {
                     p.k -= uv;
-                    Edit::delete(&mut p.edits, &p.imap, u, v);
+                    p.make_delete_edit(u, v);
                 }
                 if uv.abs() < 0.001 {
                     p.k -= 0.5;
-                    Edit::delete(&mut p.edits, &p.imap, u, v);
+                    p.make_delete_edit(u, v);
                 }
 
                 p.g.set(u, v, Weight::NEG_INFINITY);
