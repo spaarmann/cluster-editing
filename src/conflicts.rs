@@ -101,40 +101,15 @@ impl ConflictStore {
                 continue;
             }
 
-            let xuy_idx = self.idx(x, u, y);
-            let yux_idx = self.idx(y, u, x);
-            if self.conflict_store[xuy_idx] {
-                debug_assert!(self.conflict_store[xuy_idx]);
-                debug_assert!(self.conflict_store[yux_idx]);
-
-                self.conflict_count -= 1;
-                self.conflict_store[xuy_idx] = false;
-                self.conflict_store[yux_idx] = false;
-            }
+            self.remove_conflict_if_exists(x, u, y);
 
             let ux = g.has_edge(u, x);
             let uy = g.has_edge(u, y);
 
             if !ux && uy {
-                let xyu_idx = self.idx(x, y, u);
-                let uyx_idx = self.idx(u, y, x);
-
-                debug_assert!(self.conflict_store[xyu_idx].not());
-                debug_assert!(self.conflict_store[uyx_idx].not());
-
-                self.conflict_count += 1;
-                self.conflict_store[xyu_idx] = true;
-                self.conflict_store[uyx_idx] = true;
+                self.create_conflict(x, y, u);
             } else if ux && !uy {
-                let yxu_idx = self.idx(y, x, u);
-                let uxy_idx = self.idx(u, x, y);
-
-                debug_assert!(self.conflict_store[yxu_idx].not());
-                debug_assert!(self.conflict_store[uxy_idx].not());
-
-                self.conflict_count += 1;
-                self.conflict_store[yxu_idx] = true;
-                self.conflict_store[uxy_idx] = true;
+                self.create_conflict(y, x, u);
             }
         }
     }
@@ -150,40 +125,14 @@ impl ConflictStore {
                 continue;
             }
 
-            let xyu_idx = self.idx(x, y, u);
-            let uyx_idx = self.idx(u, y, x);
-            let yxu_idx = self.idx(y, x, u);
-            let uxy_idx = self.idx(u, x, y);
-            if self.conflict_store[xyu_idx] {
-                debug_assert!(self.conflict_store[xyu_idx]);
-                debug_assert!(self.conflict_store[uyx_idx]);
-
-                self.conflict_count -= 1;
-                self.conflict_store[xyu_idx] = false;
-                self.conflict_store[uyx_idx] = false;
-            }
-            if self.conflict_store[yxu_idx] {
-                debug_assert!(self.conflict_store[yxu_idx]);
-                debug_assert!(self.conflict_store[uxy_idx]);
-
-                self.conflict_count -= 1;
-                self.conflict_store[yxu_idx] = false;
-                self.conflict_store[uxy_idx] = false;
-            }
+            self.remove_conflict_if_exists(x, y, u);
+            self.remove_conflict_if_exists(y, x, u);
 
             let ux = g.has_edge(u, x);
             let uy = g.has_edge(u, y);
 
             if ux && uy {
-                let xuy_idx = self.idx(x, u, y);
-                let yux_idx = self.idx(y, u, x);
-
-                debug_assert!(self.conflict_store[xuy_idx].not());
-                debug_assert!(self.conflict_store[yux_idx].not());
-
-                self.conflict_count += 1;
-                self.conflict_store[xuy_idx] = true;
-                self.conflict_store[yux_idx] = true;
+                self.create_conflict(x, u, y);
             }
         }
     }
@@ -205,42 +154,36 @@ impl ConflictStore {
                     continue;
                 }
 
-                let uxv_idx = self.idx(u, x, v);
-                if self.conflict_store[uxv_idx] {
-                    let vxu_idx = self.idx(v, x, u);
-
-                    debug_assert!(self.conflict_store[uxv_idx]);
-                    debug_assert!(self.conflict_store[vxu_idx]);
-
-                    self.conflict_count -= 1;
-                    self.conflict_store[uxv_idx] = false;
-                    self.conflict_store[vxu_idx] = false;
-                }
-
-                let xuv_idx = self.idx(x, u, v);
-                if self.conflict_store[xuv_idx] {
-                    let vux_idx = self.idx(v, u, x);
-
-                    debug_assert!(self.conflict_store[xuv_idx]);
-                    debug_assert!(self.conflict_store[vux_idx]);
-
-                    self.conflict_count -= 1;
-                    self.conflict_store[xuv_idx] = false;
-                    self.conflict_store[vux_idx] = false;
-                }
-
-                let xvu_idx = self.idx(x, v, u);
-                if self.conflict_store[xvu_idx] {
-                    let uvx_idx = self.idx(u, v, x);
-
-                    debug_assert!(self.conflict_store[xvu_idx]);
-                    debug_assert!(self.conflict_store[uvx_idx]);
-
-                    self.conflict_count -= 1;
-                    self.conflict_store[xvu_idx] = false;
-                    self.conflict_store[uvx_idx] = false;
-                }
+                self.remove_conflict_if_exists(u, x, v);
+                self.remove_conflict_if_exists(x, u, v);
+                self.remove_conflict_if_exists(x, v, u);
             }
+        }
+    }
+
+    fn create_conflict(&mut self, v: usize, u: usize, w: usize) {
+        let vuw_idx = self.idx(v, u, w);
+        let wuv_idx = self.idx(w, u, v);
+
+        debug_assert!(self.conflict_store[vuw_idx].not());
+        debug_assert!(self.conflict_store[wuv_idx].not());
+
+        self.conflict_count += 1;
+        self.conflict_store[vuw_idx] = true;
+        self.conflict_store[wuv_idx] = true;
+    }
+
+    fn remove_conflict_if_exists(&mut self, v: usize, u: usize, w: usize) {
+        let vuw_idx = self.idx(v, u, w);
+        let wuv_idx = self.idx(w, u, v);
+
+        if self.conflict_store[vuw_idx] {
+            debug_assert!(self.conflict_store[vuw_idx]);
+            debug_assert!(self.conflict_store[wuv_idx]);
+
+            self.conflict_count -= 1;
+            self.conflict_store[vuw_idx] = false;
+            self.conflict_store[wuv_idx] = false;
         }
     }
 
