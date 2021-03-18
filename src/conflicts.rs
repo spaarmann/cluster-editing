@@ -23,6 +23,10 @@ pub struct ConflictStore {
     // indices.
     conflict_store: Vec<bool>,
     conflict_count: usize,
+    // List of edge-disjoint conflicts in the graph.
+    edge_disjoint_list: Vec<Option<(usize, usize, usize)>>,
+    // Mapping from edge to an index into `edge_disjoint_list`, or `-1`.
+    edge_disjoint_mask: Vec<i32>,
     graph_size: usize,
 }
 
@@ -43,6 +47,8 @@ impl ConflictStore {
         let size = g.size();
         let mut conflict_store = vec![false; size * size * size];
         let mut count = 0;
+        let mut edge_disjoint_mask = vec![-1; size * size];
+        let mut edge_disjoint_list = Vec::new();
 
         // TODO: We could probably avoid a few iterations here by deduplicating
 
@@ -74,6 +80,23 @@ impl ConflictStore {
                     if uw && !vw {
                         conflict_store[Self::idx_with_size(size, v, u, w)] = true;
                         count += 1;
+
+                        let uv_idx = Self::edge_idx_with_size(size, u, v);
+                        let uw_idx = Self::edge_idx_with_size(size, u, w);
+                        let vw_idx = Self::edge_idx_with_size(size, v, w);
+                        if edge_disjoint_mask[uv_idx] == -1
+                            && edge_disjoint_mask[uw_idx] == -1
+                            && edge_disjoint_mask[vw_idx] == -1
+                        {
+                            let conflict_idx = edge_disjoint_list.len() as i32;
+                            edge_disjoint_list.push(Some((v.min(w), u, v.max(w))));
+                            edge_disjoint_mask[uv_idx] = conflict_idx;
+                            edge_disjoint_mask[uw_idx] = conflict_idx;
+                            edge_disjoint_mask[vw_idx] = conflict_idx;
+                            edge_disjoint_mask[Self::edge_idx_with_size(size, v, u)] = conflict_idx;
+                            edge_disjoint_mask[Self::edge_idx_with_size(size, w, u)] = conflict_idx;
+                            edge_disjoint_mask[Self::edge_idx_with_size(size, w, v)] = conflict_idx;
+                        }
                     }
                 }
             }
@@ -86,6 +109,8 @@ impl ConflictStore {
         Self {
             conflict_store,
             conflict_count: count,
+            edge_disjoint_list,
+            edge_disjoint_mask,
             graph_size: size,
         }
     }
@@ -171,6 +196,19 @@ impl ConflictStore {
         self.conflict_count += 1;
         self.conflict_store[vuw_idx] = true;
         self.conflict_store[wuv_idx] = true;
+
+        // If the new conflict can be added to our set of edge-disjoint conflicts, go and do so.
+        let uv_idx = self.edge_idx(u, v);
+        let uw_idx = self.edge_idx(u, w);
+        let vw_idx = self.edge_idx(v, w);
+        if self.edge_disjoint_mask[uv_idx] == -1
+            && self.edge_disjoint_mask[uw_idx] == -1
+            && self.edge_disjoint_mask[vw_idx] == -1
+        {
+            let conflict_idx = self.edge_disjoint_list.len() as i32;
+            self.edge_disjoint_list.push(Some((v.min(w), u, v.max(w))));
+            self.set_edge_disjoint_conflict_mask(v, u, w, conflict_idx);
+        }
     }
 
     fn remove_conflict_if_exists(&mut self, v: usize, u: usize, w: usize) {
@@ -184,7 +222,34 @@ impl ConflictStore {
             self.conflict_count -= 1;
             self.conflict_store[vuw_idx] = false;
             self.conflict_store[wuv_idx] = false;
+
+            // If this conflict was part of our set of edge-disjoint conflicts, remove it from
+            // that.
+            let uv_idx = self.edge_idx(u, v);
+            let conflict_idx = self.edge_disjoint_mask[uv_idx];
+            if conflict_idx != -1 {
+                let _ = self.edge_disjoint_list[conflict_idx as usize].take();
+                self.set_edge_disjoint_conflict_mask(v, u, w, -1);
+
+                // TODO: Removing a conflict from the set here could enable us to add a new one
+                // instead, should definitely try if that's worth it.
+            }
         }
+    }
+
+    fn set_edge_disjoint_conflict_mask(&mut self, v: usize, u: usize, w: usize, conflict_idx: i32) {
+        let uv_idx = self.edge_idx(u, v);
+        let vu_idx = self.edge_idx(v, u);
+        let uw_idx = self.edge_idx(u, w);
+        let wu_idx = self.edge_idx(w, u);
+        let vw_idx = self.edge_idx(v, w);
+        let wv_idx = self.edge_idx(w, v);
+        self.edge_disjoint_mask[uv_idx] = conflict_idx;
+        self.edge_disjoint_mask[vu_idx] = conflict_idx;
+        self.edge_disjoint_mask[uw_idx] = conflict_idx;
+        self.edge_disjoint_mask[wu_idx] = conflict_idx;
+        self.edge_disjoint_mask[vw_idx] = conflict_idx;
+        self.edge_disjoint_mask[wv_idx] = conflict_idx;
     }
 
     pub fn conflict_count(&self) -> usize {
@@ -227,5 +292,14 @@ impl ConflictStore {
     #[inline(always)]
     fn idx_with_size(size: usize, u: usize, v: usize, w: usize) -> usize {
         w + size * (v + size * u)
+    }
+
+    #[inline(always)]
+    fn edge_idx(&self, u: usize, v: usize) -> usize {
+        v + u * self.graph_size
+    }
+    #[inline(always)]
+    fn edge_idx_with_size(size: usize, u: usize, v: usize) -> usize {
+        v + u * size
     }
 }
