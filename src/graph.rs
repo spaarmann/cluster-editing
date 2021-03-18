@@ -1,4 +1,6 @@
-pub trait GraphWeight: PartialOrd + Copy {
+use std::ops::{Add, AddAssign, Neg};
+
+pub trait GraphWeight: PartialOrd + Copy + Add + AddAssign + Neg<Output = Self> {
     const ZERO: Self;
     const ONE: Self;
     const NEG_ONE: Self;

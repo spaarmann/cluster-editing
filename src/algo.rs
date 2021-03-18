@@ -396,6 +396,21 @@ impl<'a> ProblemInstance<'a> {
     fn find_cluster_editing(mut self) -> (bool, Self) {
         let _k_start = self.k;
 
+        let min_cost = self
+            .conflicts
+            .min_cost_to_resolve_edge_disjoint_conflicts(&self.g);
+        if self.k < min_cost {
+            trace_and_path_log!(
+                self,
+                _k_start,
+                "Need {} to resolve {} edge-disjoint conflicts, can't afford with {}",
+                min_cost,
+                self.conflicts.edge_disjoint_conflict_count(),
+                self.k
+            );
+            return (false, self);
+        }
+
         // If k is already 0, we can only succeed if we currently have a solution; there is no point in trying
         // to do further reductions or splitting as we can't afford any edits anyway.
         if self.k > 0.0 {
@@ -559,6 +574,21 @@ impl<'a> ProblemInstance<'a> {
                 _k_start,
                 self.k
             );
+
+            let min_cost = self
+                .conflicts
+                .min_cost_to_resolve_edge_disjoint_conflicts(&self.g);
+            if self.k < min_cost {
+                trace_and_path_log!(
+                    self,
+                    _k_start,
+                    "Need {} to resolve {} edge-disjoint conflicts, can't afford with {} after reduction",
+                    min_cost,
+                    self.conflicts.edge_disjoint_conflict_count(),
+                    self.k
+                );
+                return (false, self);
+            }
         }
 
         if self.k < 0.0 {

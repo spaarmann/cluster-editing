@@ -27,6 +27,7 @@ pub struct ConflictStore {
     edge_disjoint_list: Vec<Option<(usize, usize, usize)>>,
     // Mapping from edge to an index into `edge_disjoint_list`, or `-1`.
     edge_disjoint_mask: Vec<i32>,
+    edge_disjoint_count: usize,
     graph_size: usize,
 }
 
@@ -106,11 +107,14 @@ impl ConflictStore {
 
         count = count / 2;
 
+        let edge_disjoint_count = edge_disjoint_list.len();
+
         Self {
             conflict_store,
             conflict_count: count,
             edge_disjoint_list,
             edge_disjoint_mask,
+            edge_disjoint_count,
             graph_size: size,
         }
     }
@@ -208,6 +212,7 @@ impl ConflictStore {
             let conflict_idx = self.edge_disjoint_list.len() as i32;
             self.edge_disjoint_list.push(Some((v.min(w), u, v.max(w))));
             self.set_edge_disjoint_conflict_mask(v, u, w, conflict_idx);
+            self.edge_disjoint_count += 1;
         }
     }
 
@@ -226,10 +231,21 @@ impl ConflictStore {
             // If this conflict was part of our set of edge-disjoint conflicts, remove it from
             // that.
             let uv_idx = self.edge_idx(u, v);
-            let conflict_idx = self.edge_disjoint_mask[uv_idx];
-            if conflict_idx != -1 {
-                let _ = self.edge_disjoint_list[conflict_idx as usize].take();
+            let uw_idx = self.edge_idx(u, w);
+            let vw_idx = self.edge_idx(v, w);
+            let conflict_idx_uv = self.edge_disjoint_mask[uv_idx];
+            let conflict_idx_uw = self.edge_disjoint_mask[uw_idx];
+            let conflict_idx_vw = self.edge_disjoint_mask[vw_idx];
+            if conflict_idx_uv != -1
+                && conflict_idx_uv == conflict_idx_uw
+                && conflict_idx_uv == conflict_idx_vw
+            {
+                let _ = self.edge_disjoint_list[conflict_idx_uv as usize]
+                    .take()
+                    .unwrap();
+
                 self.set_edge_disjoint_conflict_mask(v, u, w, -1);
+                self.edge_disjoint_count -= 1;
 
                 // TODO: Removing a conflict from the set here could enable us to add a new one
                 // instead, should definitely try if that's worth it.
@@ -256,9 +272,38 @@ impl ConflictStore {
         self.conflict_count
     }
 
-    // This would be nice for some things, but maybe isn't super critical to supply.
     pub fn edge_disjoint_conflict_count(&self) -> usize {
-        todo!();
+        self.edge_disjoint_count
+    }
+
+    pub fn min_cost_to_resolve_edge_disjoint_conflicts<T: GraphWeight>(&self, g: &Graph<T>) -> T {
+        let mut sum = T::ZERO;
+
+        for &conflict in &self.edge_disjoint_list {
+            if let Some((v, u, w)) = conflict {
+                let uv = g.get(u, v);
+                let uw = g.get(u, w);
+                let vw = -g.get(v, w);
+
+                let min = if uv < uw {
+                    if uv < vw {
+                        uv
+                    } else {
+                        vw
+                    }
+                } else {
+                    if uw < vw {
+                        uw
+                    } else {
+                        vw
+                    }
+                };
+
+                sum += min;
+            }
+        }
+
+        sum
     }
 
     pub fn get_next_conflict(&self) -> Option<(usize, usize, usize)> {
