@@ -69,6 +69,8 @@ pub fn param_dependent_reduction(p: &mut ProblemInstance) {
 
     induced_cost_reduction(p);
 
+    k_plus_one_reduction(p);
+
     dbg_trace_indent!(
         p,
         _k_start,
@@ -1150,5 +1152,74 @@ fn induced_cost_reduction(p: &mut ProblemInstance) {
         }
 
         u += 1;
+    }
+}
+
+fn k_plus_one_reduction(p: &mut ProblemInstance) {
+    for u in 0..p.g.size() {
+        continue_if_not_present!(p.g, u);
+        for v in (u + 1)..p.g.size() {
+            continue_if_not_present!(p.g, v);
+
+            let uv = p.g.get(u, v);
+
+            if uv <= Weight::ZERO {
+                let mut min_cost = Weight::ZERO;
+
+                for w in p.conflicts.conflicts_involving(u, v) {
+                    // Since uv does not exist, the conflict must be u-w-v.
+                    // Minimum cost of resolving it without adding uv is then:
+                    min_cost += p.g.get(w, u).min(p.g.get(w, v));
+                }
+
+                if min_cost > p.k {
+                    trace_and_path_log!(
+                        p,
+                        p.k,
+                        "k+1, merge {:?}-{:?}, with min_cost {}, uv {} and k {}",
+                        p.imap[u],
+                        p.imap[v],
+                        min_cost,
+                        uv,
+                        p.k
+                    );
+
+                    p.merge(u, v);
+                }
+            } else {
+                let mut min_cost = Weight::ZERO;
+
+                for w in p.conflicts.conflicts_involving(u, v) {
+                    // uv exists, so the conflict is either u-v-w (uw does not exist), or v-u-w (vw
+                    // does not exist).
+                    let uw = p.g.get(w, u);
+                    let vw = p.g.get(w, v);
+                    if uw <= Weight::ZERO {
+                        // conflict is u-v-w, so min cost of resolving without removing uv is:
+                        min_cost += vw.min(-uw);
+                    } else {
+                        // conflict is v-u-w, so min cost of resolving without removing uv is:
+                        min_cost += uw.min(-vw);
+                    }
+                }
+
+                if min_cost > p.k {
+                    trace_and_path_log!(
+                        p,
+                        p.k,
+                        "k+1, forbid {:?}-{:?}, with min_cost {}, uv {} and k {}",
+                        p.imap[u],
+                        p.imap[v],
+                        min_cost,
+                        uv,
+                        p.k
+                    );
+
+                    p.k -= uv;
+                    p.make_delete_edit(u, v);
+                    p.g.set(u, v, Weight::NEG_INFINITY);
+                }
+            }
+        }
     }
 }

@@ -306,6 +306,20 @@ impl ConflictStore {
         sum
     }
 
+    pub fn conflicts_involving(&self, u: usize, v: usize) -> impl Iterator<Item = usize> + '_ {
+        (0..self.graph_size).filter(move |&w| {
+            // Potential conflicts: u-v-w, u-w-v, v-u-w (plus symmetries, but we can ignore those
+            // here because either order is flagged in `conflict_store`.
+            let idx_uvw = self.idx(u, v, w);
+            let idx_uwv = self.idx(u, w, v);
+            let idx_vuw = self.idx(v, u, w);
+
+            self.conflict_store[idx_uvw]
+                || self.conflict_store[idx_uwv]
+                || self.conflict_store[idx_vuw]
+        })
+    }
+
     pub fn get_next_conflict(&self) -> Option<(usize, usize, usize)> {
         // TODO: This can maybe also try to be clever about which conflict to supply.
         if self.conflict_count == 0 {
