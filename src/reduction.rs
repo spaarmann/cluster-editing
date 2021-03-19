@@ -55,7 +55,7 @@ pub fn initial_param_independent_reduction(p: &mut ProblemInstance) -> f32 {
 pub fn param_dependent_reduction(p: &mut ProblemInstance) {
     let _k_start = p.k;
 
-    if p.k <= Weight::ZERO {
+    if p.k <= 0.0 {
         return;
     }
 
@@ -69,7 +69,9 @@ pub fn param_dependent_reduction(p: &mut ProblemInstance) {
 
     induced_cost_reduction(p);
 
-    k_plus_one_reduction(p);
+    if p.k > 0.0 {
+        k_plus_one_reduction(p);
+    }
 
     dbg_trace_indent!(
         p,
@@ -1163,6 +1165,10 @@ fn k_plus_one_reduction(p: &mut ProblemInstance) {
 
             let uv = p.g.get(u, v);
 
+            if !uv.is_finite() {
+                continue;
+            }
+
             if uv <= Weight::ZERO {
                 let mut min_cost = Weight::ZERO;
 
@@ -1185,6 +1191,10 @@ fn k_plus_one_reduction(p: &mut ProblemInstance) {
                     );
 
                     p.merge(u, v);
+
+                    if p.k < 0.0 {
+                        return;
+                    }
                 }
             } else {
                 let mut min_cost = Weight::ZERO;
@@ -1218,6 +1228,10 @@ fn k_plus_one_reduction(p: &mut ProblemInstance) {
                     p.k -= uv;
                     p.make_delete_edit(u, v);
                     p.g.set(u, v, Weight::NEG_INFINITY);
+
+                    if p.k < 0.0 {
+                        return;
+                    }
                 }
             }
         }
