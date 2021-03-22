@@ -52,7 +52,7 @@ pub fn initial_param_independent_reduction(p: &mut ProblemInstance) -> f32 {
     k_start
 }
 
-pub fn param_dependent_reduction(p: &mut ProblemInstance) {
+pub fn full_param_dependent_reduction(p: &mut ProblemInstance) {
     let _k_start = p.k;
 
     if p.k <= 0.0 {
@@ -62,7 +62,7 @@ pub fn param_dependent_reduction(p: &mut ProblemInstance) {
     dbg_trace_indent!(
         p,
         _k_start,
-        "Starting param-dep-reduction, k {}, edits {:?}.",
+        "Starting full param-dep-reduction, k {}, edits {:?}.",
         p.k,
         p.edits
     );
@@ -76,7 +76,33 @@ pub fn param_dependent_reduction(p: &mut ProblemInstance) {
     dbg_trace_indent!(
         p,
         _k_start,
-        "Finished param-dep-reduction, {}, edits {:?}.",
+        "Finished full param-dep-reduction, {}, edits {:?}.",
+        p.k,
+        p.edits
+    );
+}
+
+pub fn fast_param_dependent_reduction(p: &mut ProblemInstance) {
+    let _k_start = p.k;
+
+    if p.k <= 0.0 {
+        return;
+    }
+
+    dbg_trace_indent!(
+        p,
+        _k_start,
+        "Starting fast param-dep-reduction, k {}, edits {:?}.",
+        p.k,
+        p.edits
+    );
+
+    induced_cost_reduction(p);
+
+    dbg_trace_indent!(
+        p,
+        _k_start,
+        "Finished fast param-dep-reduction, {}, edits {:?}.",
         p.k,
         p.edits
     );

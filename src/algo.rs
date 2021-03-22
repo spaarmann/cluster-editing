@@ -47,9 +47,12 @@ struct ComponentStatistics {
     // full_param_indep_reduction[max_k][k] = x => in the run starting with k=max_k, at k=k
     // the full reduction achieved a reduction in `k` of `x`.
     full_param_indep_reduction: HashMap<usize, HashMap<FloatKey, f32>>,
-    // param_dep_reduction[max_k][k] = x => in the run starting with k=max_k, at k=k
-    // the param-dependent reduction achieved a reduction in `k` of `x`.
-    param_dep_reduction: HashMap<usize, HashMap<FloatKey, f32>>,
+    // fast_param_dep_reduction[max_k][k] = x => in the run starting with k=max_k, at k=k
+    // the fast param-dependent reduction achieved a reduction in `k` of `x`.
+    fast_param_dep_reduction: HashMap<usize, HashMap<FloatKey, f32>>,
+    // full_param_dep_reduction[max_k][k] = x => in the run starting with k=max_k, at k=k
+    // the full param-dependent reduction achieved a reduction in `k` of `x`.
+    full_param_dep_reduction: HashMap<usize, HashMap<FloatKey, f32>>,
     // Reduction of node count from the initial param-independent reduction.
     initial_reduction: usize,
     component_node_count: usize,
@@ -60,6 +63,7 @@ struct ComponentStatistics {
 pub struct Parameters {
     pub full_reduction_interval: i32,
     pub fast_reduction_interval: i32,
+    pub full_indep_reduction_interval: i32,
     pub debug_opts: HashMap<String, String>,
     pub stats_dir: Option<PathBuf>,
 
@@ -72,12 +76,14 @@ impl Parameters {
     pub fn new(
         full_reduction_interval: i32,
         fast_reduction_interval: i32,
+        full_indep_reduction_interval: i32,
         debug_opts: HashMap<String, String>,
         stats_dir: Option<PathBuf>,
     ) -> Self {
         Self {
             full_reduction_interval,
             fast_reduction_interval,
+            full_indep_reduction_interval,
             debug_opts,
             stats_dir,
             stats: Default::default(),
@@ -362,6 +368,7 @@ pub struct ProblemInstance<'a> {
     pub k_max: f32,
     pub full_reduction_counter: i32,
     pub fast_reduction_counter: i32,
+    pub full_indep_reduction_counter: i32,
     pub edits: Vec<Edit>,
     pub path_log: String,
     // Helpers for `reduction`, stored here to avoid allocating new ones as much.
@@ -380,6 +387,7 @@ impl<'a> ProblemInstance<'a> {
             k_max: 0.0,
             full_reduction_counter: 0,
             fast_reduction_counter: 0,
+            full_indep_reduction_counter: 0,
             edits: Vec::new(),
             path_log: String::new(),
             r: Some(Default::default()),
@@ -516,20 +524,41 @@ impl<'a> ProblemInstance<'a> {
 
             dbg_trace_indent!(self, self.k, "Performing reduction");
 
-            let k_before_param_dep_reduction = self.k;
-            reduction::param_dependent_reduction(&mut self);
+            if self.full_indep_reduction_counter == 0 {
+                let k_before_param_dep_reduction = self.k;
+                reduction::full_param_dependent_reduction(&mut self);
+                self.full_indep_reduction_counter = self.params.full_indep_reduction_interval;
 
-            if self.params.stats_dir.is_some() {
-                self.params
-                    .stats
-                    .borrow_mut()
-                    .param_dep_reduction
-                    .entry(self.k_max as usize)
-                    .or_default()
-                    .insert(
-                        FloatKey(k_before_param_dep_reduction),
-                        k_before_param_dep_reduction - self.k,
-                    );
+                if self.params.stats_dir.is_some() {
+                    self.params
+                        .stats
+                        .borrow_mut()
+                        .full_param_dep_reduction
+                        .entry(self.k_max as usize)
+                        .or_default()
+                        .insert(
+                            FloatKey(k_before_param_dep_reduction),
+                            k_before_param_dep_reduction - self.k,
+                        );
+                }
+            } else {
+                self.full_indep_reduction_counter -= 1;
+
+                let k_before_param_dep_reduction = self.k;
+                reduction::fast_param_dependent_reduction(&mut self);
+
+                if self.params.stats_dir.is_some() {
+                    self.params
+                        .stats
+                        .borrow_mut()
+                        .fast_param_dep_reduction
+                        .entry(self.k_max as usize)
+                        .or_default()
+                        .insert(
+                            FloatKey(k_before_param_dep_reduction),
+                            k_before_param_dep_reduction - self.k,
+                        );
+                }
             }
 
             let k_before_indep_reduction = self.k;
@@ -683,6 +712,7 @@ impl<'a> ProblemInstance<'a> {
         let prev_k = self.k;
         let prev_full_counter = self.full_reduction_counter;
         let prev_fast_counter = self.fast_reduction_counter;
+        let prev_full_indep_counter = self.full_indep_reduction_counter;
 
         // Found a conflict triple, now branch into 2 cases:
         // 1. Set uv to forbidden
@@ -740,6 +770,7 @@ impl<'a> ProblemInstance<'a> {
         this.k = prev_k;
         this.full_reduction_counter = prev_full_counter;
         this.fast_reduction_counter = prev_fast_counter;
+        this.full_indep_reduction_counter = prev_full_indep_counter;
 
         // 2. Merge uv
         let res2 = {
@@ -946,9 +977,23 @@ fn write_stat_block(
         writer.flush().unwrap();
     }
 
-    if let Some(reductions) = stats.param_dep_reduction.get(&k_max) {
+    if let Some(reductions) = stats.full_param_dep_reduction.get(&k_max) {
         let path = stats_dir.join(format!(
-            "comp_{}_k{}_paramdep.stats",
+            "comp_{}_k{}_paramdep_full.stats",
+            component_index, k_max
+        ));
+        let file = File::create(&path).unwrap();
+        let mut writer = BufWriter::new(file);
+        writeln!(writer, "k | red").unwrap();
+        for (k, v) in reductions {
+            writeln!(writer, "{} | {}", k.0, v).unwrap();
+        }
+        writer.flush().unwrap();
+    }
+
+    if let Some(reductions) = stats.fast_param_dep_reduction.get(&k_max) {
+        let path = stats_dir.join(format!(
+            "comp_{}_k{}_paramdep_fast.stats",
             component_index, k_max
         ));
         let file = File::create(&path).unwrap();
