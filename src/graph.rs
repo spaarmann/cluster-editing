@@ -266,6 +266,7 @@ impl<T: GraphWeight> Graph<T> {
         let mut components = Vec::new();
 
         let mut current = Vec::new();
+        let mut current_with_deg = Vec::new();
 
         let mut component_map = vec![0; self.size];
 
@@ -293,15 +294,38 @@ impl<T: GraphWeight> Graph<T> {
 
             let mut comp = Self::new(current.len());
             let mut comp_imap = IndexMap::new(current.len());
-            for i in 0..current.len() {
-                let v = current[i];
-                comp_imap[i] = imap[v].clone();
+
+            // Sort vertices by their degree in the component.
+            current_with_deg.clear();
+            for &v in &current {
+                let mut deg = 0;
+                for &u in &current {
+                    if u == v {
+                        continue;
+                    }
+                    if self.get(v, u) > T::ZERO {
+                        deg += 1;
+                    }
+                }
+                current_with_deg.push((v, deg));
+            }
+
+            // Sorts in ascending order, so largest degree is now last.
+            current_with_deg.sort_unstable_by_key(|&(_, d)| d);
+
+            for i in (0..current.len()).rev() {
+                // We want current_with_deg[0] to become the last node in comp, and
+                // current_with_deg[current.len() - 1] to become the first one.
+                let idx = current.len() - 1 - i;
+
+                let v = current_with_deg[i].0;
+                comp_imap[idx] = imap[v].clone();
                 component_map[v] = components.len();
 
-                for j in 0..i {
-                    let w = current[j];
+                for j in 0..idx {
+                    let w = current_with_deg[current.len() - 1 - j].0;
 
-                    comp.set(i, j, self.get(v, w));
+                    comp.set(idx, j, self.get(v, w));
                 }
             }
 
