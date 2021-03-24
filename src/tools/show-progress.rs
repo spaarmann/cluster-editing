@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::error::Error;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -17,6 +18,11 @@ struct Opt {
     /// printed. If a folder, the same will happen for every file directly (non-recursively) inside the folder.
     #[structopt(parse(from_os_str))]
     input: PathBuf,
+
+    /// If specified, will compare the results of the given run to the first one. If the first is a
+    /// file, this must be too, and the same for directories.
+    #[structopt(long = "diff", parse(from_os_str))]
+    diff: Option<PathBuf>,
 }
 
 enum RunProgress {
@@ -31,6 +37,19 @@ enum RunProgress {
     },
 }
 
+impl RunProgress {
+    fn filename(&self) -> &str {
+        match self {
+            Self::Finished { filename, time: _ } => filename,
+            Self::Cancelled {
+                filename,
+                comp: _,
+                max_k: _,
+            } => filename,
+        }
+    }
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     let opt = Opt::from_args();
@@ -39,40 +58,52 @@ fn main() -> Result<(), Box<dyn Error>> {
     if base_path.is_file() {
         let result = analyze_file(base_path)?;
 
-        match result {
-            RunProgress::Cancelled {
-                filename,
-                comp,
-                max_k,
-            } => println!("{} got to component {}, k = {}", filename, comp, max_k),
-            RunProgress::Finished { filename, time } => {
-                println!("{} finished in {} seconds", filename, time)
-            }
+        if let Some(diff_path) = opt.diff {
+            let diff_result = analyze_file(diff_path)?;
+            print_diff(&result, &diff_result);
+        } else {
+            print_result(&result, "");
         }
 
         return Ok(());
     }
 
-    let mut results = Vec::new();
+    let mut results = HashMap::new();
 
     // It's a directory!
     for entry in base_path.read_dir()? {
         let file = entry?.path();
         if file.metadata()?.is_file() {
-            results.push(analyze_file(file)?);
+            let result = analyze_file(file)?;
+            results.insert(result.filename().to_string(), result);
         }
     }
 
-    for result in results {
-        match result {
-            RunProgress::Cancelled {
-                filename,
-                comp,
-                max_k,
-            } => println!("{} got to component {}, k = {}", filename, comp, max_k),
-            RunProgress::Finished { filename, time } => {
-                println!("{} finished in {} seconds", filename, time)
+    if let Some(diff_path) = opt.diff {
+        let mut diff_results = HashMap::new();
+        for entry in diff_path.read_dir()? {
+            let file = entry?.path();
+            if file.metadata()?.is_file() {
+                let result = analyze_file(file)?;
+                diff_results.insert(result.filename().to_string(), result);
             }
+        }
+
+        for (name, first) in &results {
+            if let Some(second) = diff_results.get(name) {
+                print_diff(first, second);
+            } else {
+                print_result(first, " in first, not present in second.");
+            }
+        }
+        for (name, second) in &diff_results {
+            if let None = results.get(name) {
+                print_result(second, " in second, not present in first.");
+            }
+        }
+    } else {
+        for result in &results {
+            print_result(result.1, "");
         }
     }
 
@@ -80,10 +111,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn analyze_file<P: AsRef<Path>>(file: P) -> Result<RunProgress, Box<dyn Error>> {
-    //enum RunProgress {
-    //    Finished { time: f32 },
-    //    Cancelled { comp: i32, max_k: i32 }
-    //}
     let file = file.as_ref();
     let filename = file.file_name().unwrap().to_str().unwrap();
     let file = File::open(file)?;
@@ -159,4 +186,112 @@ fn analyze_file<P: AsRef<Path>>(file: P) -> Result<RunProgress, Box<dyn Error>> 
         comp: max_component,
         max_k,
     })
+}
+
+fn print_result(result: &RunProgress, suffix: &str) {
+    match result {
+        RunProgress::Cancelled {
+            filename,
+            comp,
+            max_k,
+        } => println!(
+            "{} got to component {}, k = {}{}",
+            filename, comp, max_k, suffix
+        ),
+        RunProgress::Finished { filename, time } => {
+            println!("{} finished in {} seconds{}", filename, time, suffix)
+        }
+    }
+}
+
+fn print_diff(first: &RunProgress, second: &RunProgress) {
+    use RunProgress::*;
+
+    match (first, second) {
+        (
+            Finished {
+                filename: name1,
+                time: time1,
+            },
+            Finished {
+                filename: name2,
+                time: time2,
+            },
+        ) => {
+            assert_eq!(name1, name2);
+            println!(
+                "{} finished went from {}s to {}s: {:+}s",
+                name1,
+                time1,
+                time2,
+                time2 - time1
+            );
+        }
+        (
+            Finished {
+                filename: name1,
+                time: time1,
+            },
+            Cancelled {
+                filename: name2,
+                comp: comp2,
+                max_k: k2,
+            },
+        ) => {
+            assert_eq!(name1, name2);
+            println!(
+                "{} first finished in {}s, but was now cancelled at comp {}, k {}",
+                name1, time1, comp2, k2
+            );
+        }
+        (
+            Cancelled {
+                filename: name1,
+                comp: comp1,
+                max_k: k1,
+            },
+            Finished {
+                filename: name2,
+                time: time2,
+            },
+        ) => {
+            assert_eq!(name1, name2);
+            println!(
+                "{} was first cancelled at comp {}, k {}, but now finished in {}s",
+                name1, comp1, k1, time2
+            );
+        }
+        (
+            Cancelled {
+                filename: name1,
+                comp: comp1,
+                max_k: k1,
+            },
+            Cancelled {
+                filename: name2,
+                comp: comp2,
+                max_k: k2,
+            },
+        ) => {
+            assert_eq!(name1, name2);
+            if comp1 == comp2 {
+                println!(
+                    "{} cancelled at same comp {}, k from {} to {}: {:+}k",
+                    name1,
+                    comp1,
+                    k1,
+                    k2,
+                    k2 - k1
+                );
+            } else {
+                println!(
+                    "{} cancelled first at comp {}, now in comp {}: {:+}comp",
+                    name1,
+                    comp1,
+                    comp2,
+                    comp2 - comp1
+                );
+            }
+        }
+    }
 }
