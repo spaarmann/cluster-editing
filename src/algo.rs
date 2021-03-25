@@ -146,23 +146,17 @@ pub fn execute_algorithm(graph: &PetGraph, mut params: Parameters) -> PetGraph {
         }
     }
 
+    info!("Starting sanity check.");
+
     // Do a sanity check: There should be no conflict triple in the resulting graph at the end.
     for u in result.node_indices() {
-        for v in result.node_indices() {
-            if u == v {
-                continue;
-            }
-
-            if result.find_edge(u, v).is_none() {
-                continue;
-            }
-
-            for w in result.node_indices() {
-                if v == w || u == w {
+        for v in result.neighbors(u) {
+            for w in result.neighbors(u) {
+                if v == w {
                     continue;
                 }
 
-                if result.find_edge(u, w).is_some() && result.find_edge(v, w).is_none() {
+                if result.find_edge(v, w).is_none() {
                     // `vuw` is a conflict triple!
                     panic!(
                         "Result graph still has a conflict triple! v-u-w: {}-{}-{}",
@@ -174,6 +168,8 @@ pub fn execute_algorithm(graph: &PetGraph, mut params: Parameters) -> PetGraph {
             }
         }
     }
+
+    info!("Computing de-duplicated set of edits.");
 
     // The algorithm can produce "overlapping" edits. It might e.g. have a "delete(uv)"
     // edit followed later by an "insert(uv)" edit.
