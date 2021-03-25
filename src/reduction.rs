@@ -1091,7 +1091,11 @@ fn induced_cost_reduction(p: &mut ProblemInstance) {
                 }
             }
 
-            if icp + (-uv).max(Weight::ZERO) > p.k {
+            let bound = p
+                .conflicts
+                .min_cost_to_resolve_edge_disjoint_conflicts_ignoring(&p.g, u, v);
+
+            if icp + (-uv).max(Weight::ZERO) + bound > p.k {
                 trace_and_path_log!(
                     p,
                     p.k,
@@ -1126,7 +1130,7 @@ fn induced_cost_reduction(p: &mut ProblemInstance) {
                 // ends up being better.
                 continue 'outer;
             }
-            if icf + uv.max(Weight::ZERO) > p.k {
+            if icf + uv.max(Weight::ZERO) + bound > p.k {
                 trace_and_path_log!(
                     p,
                     p.k,

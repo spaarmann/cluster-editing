@@ -306,6 +306,45 @@ impl ConflictStore {
         sum
     }
 
+    pub fn min_cost_to_resolve_edge_disjoint_conflicts_ignoring<T: GraphWeight>(
+        &self,
+        g: &Graph<T>,
+        x: usize,
+        y: usize,
+    ) -> T {
+        let mut sum = T::ZERO;
+
+        for &conflict in &self.edge_disjoint_list {
+            if let Some((v, u, w)) = conflict {
+                if u == x || v == x || w == x || u == y || v == y || w == y {
+                    continue;
+                }
+
+                let uv = g.get(u, v);
+                let uw = g.get(u, w);
+                let vw = -g.get(v, w);
+
+                let min = if uv < uw {
+                    if uv < vw {
+                        uv
+                    } else {
+                        vw
+                    }
+                } else {
+                    if uw < vw {
+                        uw
+                    } else {
+                        vw
+                    }
+                };
+
+                sum += min;
+            }
+        }
+
+        sum
+    }
+
     pub fn get_next_conflict(&self) -> Option<(usize, usize, usize)> {
         // TODO: This can maybe also try to be clever about which conflict to supply.
         if self.conflict_count == 0 {
