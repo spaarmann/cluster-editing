@@ -323,7 +323,11 @@ pub fn find_optimal_cluster_editing(
         }
     }
 
-    let mut k = k_start;
+    let min_cost = instance
+        .conflicts
+        .min_cost_to_resolve_edge_disjoint_conflicts(&instance.g);
+
+    let mut k = f32::max(min_cost.floor(), k_start);
     loop {
         info!("[driver] Starting search with k={}...", k);
 
