@@ -13,6 +13,8 @@ use std::io::{prelude::*, BufWriter};
 use std::path::PathBuf;
 
 use log::info;
+use num_bigint::BigUint;
+use num_traits::{One, Pow, ToPrimitive, Zero};
 use petgraph::graph::NodeIndex;
 
 #[derive(Copy, Clone, Debug)]
@@ -314,10 +316,18 @@ pub fn find_optimal_cluster_editing(
         let mut instance = instance.fork_new_branch();
         instance.k = only_k as f32;
         instance.k_max = only_k as f32;
-        if let (true, instance) = instance.find_cluster_editing() {
+        let (success, instance) = instance.find_cluster_editing();
+        if success {
             log::info!("Found solution, final path log:\n{}", instance.path_log);
             return (instance.k as i32, instance.edits);
         } else {
+            let max_branches = BigUint::from(2u32).pow(only_k);
+            log::info!(
+                "Handled {} of {} branches ({}%)",
+                instance.branch_counter,
+                max_branches,
+                &instance.branch_counter / &max_branches * 100u32
+            );
             log::warn!("Found no solution!");
             return (0, Vec::new());
         }
@@ -327,7 +337,7 @@ pub fn find_optimal_cluster_editing(
         .conflicts
         .min_cost_to_resolve_edge_disjoint_conflicts(&instance.g);
 
-    let mut k = f32::max(min_cost.floor(), k_start);
+    let mut k = 1.0; //f32::max(min_cost.floor(), k_start);
     loop {
         info!("[driver] Starting search with k={}...", k);
 
@@ -348,6 +358,14 @@ pub fn find_optimal_cluster_editing(
             return (instance.k as i32, instance.edits);
         }
 
+        let max_branches = BigUint::from(2u32).pow(k as usize);
+        log::info!(
+            "Handled {} of {} branches ({}%)",
+            instance.branch_counter,
+            max_branches,
+            instance.branch_counter.to_f64().unwrap() / max_branches.to_f64().unwrap() * 100.0
+        );
+
         k += 1.0;
     }
 }
@@ -360,6 +378,7 @@ pub struct ProblemInstance<'a> {
     pub imap: IndexMap,
     pub k: f32,
     pub k_max: f32,
+    pub branch_counter: BigUint,
     pub full_reduction_counter: i32,
     pub fast_reduction_counter: i32,
     pub edits: Vec<Edit>,
@@ -378,6 +397,7 @@ impl<'a> ProblemInstance<'a> {
             conflicts,
             k: 0.0,
             k_max: 0.0,
+            branch_counter: BigUint::zero(),
             full_reduction_counter: 0,
             fast_reduction_counter: 0,
             edits: Vec::new(),
@@ -390,13 +410,15 @@ impl<'a> ProblemInstance<'a> {
         self.clone()
     }
 
+    fn remaining_branch_count(k: f32) -> BigUint {
+        BigUint::from(2u32).pow(k.max(0.0) as usize)
+    }
+
     /// Tries to find a solution of size <= k for this problem instance.
-    // `k` is stored as float because it needs to be compared with and changed by values from
-    // the WeightMap a lot, which are floats.
     fn find_cluster_editing(mut self) -> (bool, Self) {
         let _k_start = self.k;
 
-        let min_cost = self
+        /*let min_cost = self
             .conflicts
             .min_cost_to_resolve_edge_disjoint_conflicts(&self.g);
         if self.k < min_cost {
@@ -408,8 +430,12 @@ impl<'a> ProblemInstance<'a> {
                 self.conflicts.edge_disjoint_conflict_count(),
                 self.k
             );
+
+            // We just crossed away the remaining 2^k branches here.
+            self.branch_counter += BigUint::from(2u32).pow(self.k as usize);
+
             return (false, self);
-        }
+        }*/
 
         // If k is already 0, we can only succeed if we currently have a solution; there is no point in trying
         // to do further reductions or splitting as we can't afford any edits anyway.
@@ -575,7 +601,12 @@ impl<'a> ProblemInstance<'a> {
                 self.k
             );
 
-            let min_cost = self
+            // Reduction just brought us from 2^{_k_start} branches remaining below here to 2^k
+            // branches remaining.
+            self.branch_counter +=
+                Self::remaining_branch_count(_k_start) - Self::remaining_branch_count(self.k);
+
+            /*let min_cost = self
                 .conflicts
                 .min_cost_to_resolve_edge_disjoint_conflicts(&self.g);
             if self.k < min_cost {
@@ -587,11 +618,16 @@ impl<'a> ProblemInstance<'a> {
                     self.conflicts.edge_disjoint_conflict_count(),
                     self.k
                 );
+
+                // We just crossed away the remaining 2^k branches here.
+                self.branch_counter += BigUint::from(2u32).pow(self.k as usize);
+
                 return (false, self);
-            }
+            }*/
         }
 
         if self.k < 0.0 {
+            self.branch_counter += BigUint::one();
             return (false, self);
         }
 
@@ -627,6 +663,7 @@ impl<'a> ProblemInstance<'a> {
 
         let (v, u, _w) = match triple {
             None => {
+                let k_before_zeroes = self.k;
                 // No more conflict triples.
                 // If there are still zero-edges, we need to "cash in" the 0.5 edit cost we deferred
                 // when merging.
@@ -643,21 +680,18 @@ impl<'a> ProblemInstance<'a> {
 
                 self.k -= zero_count / 2.0;
 
-                dbg_trace_indent!(
+                trace_and_path_log!(
                     self,
                     _k_start,
                     "Found no triple, realized {} zero-edges.\n",
                     zero_count
                 );
 
-                append_path_log!(
-                    self,
-                    "Found no triple, realized {} zero-edges.\n",
-                    zero_count
-                );
-
                 if self.k < 0.0 {
                     // not enough cost left over to actually realize those zero-edges.
+
+                    // This also means we crossed out all the remaining branches of course.
+                    self.branch_counter += Self::remaining_branch_count(k_before_zeroes);
                     return (false, self);
                 }
 
@@ -684,6 +718,8 @@ impl<'a> ProblemInstance<'a> {
         let prev_full_counter = self.full_reduction_counter;
         let prev_fast_counter = self.fast_reduction_counter;
 
+        let k_before_branch = self.k;
+
         // Found a conflict triple, now branch into 2 cases:
         // 1. Set uv to forbidden
         let (solution_found, mut this) = {
@@ -693,7 +729,7 @@ impl<'a> ProblemInstance<'a> {
                 self.k = self.k - uv as f32;
 
                 if self.k >= 0.0 {
-                    dbg_trace_indent!(
+                    trace_and_path_log!(
                         self,
                         _k_start,
                         "Branch: Set {:?}-{:?} forbidden, k after edit: {} !",
@@ -701,16 +737,14 @@ impl<'a> ProblemInstance<'a> {
                         self.imap[v],
                         self.k
                     );
-                    append_path_log!(
-                        self,
-                        "Branch: Set {:?}-{:?} forbidden, k after edit: {} !\n",
-                        self.imap[u],
-                        self.imap[v],
-                        self.k
-                    );
 
                     self.g.set(u, v, InfiniteNum::NEG_INFINITY);
                     self.make_delete_edit(u, v);
+
+                    // If this set generated cost, we basically eliminated some amount of branches by doing this
+                    // set.
+                    self.branch_counter += Self::remaining_branch_count(k_before_branch - 1.0)
+                        - Self::remaining_branch_count(self.k);
 
                     self.find_cluster_editing()
                 } else {
@@ -721,9 +755,19 @@ impl<'a> ProblemInstance<'a> {
                         self.imap[u],
                         self.imap[v]
                     );
+
+                    if k_before_branch > 0.0 {
+                        self.branch_counter +=
+                            BigUint::from(2u32).pow((k_before_branch - 1.0).max(0.0) as usize);
+                    }
+
                     (false, self)
                 }
             } else {
+                // TODO: is this one right?
+                panic!();
+                self.branch_counter +=
+                    BigUint::from(2u32).pow((k_before_branch - 1.0).max(0.0) as usize);
                 (false, self)
             }
         };
@@ -740,9 +784,10 @@ impl<'a> ProblemInstance<'a> {
         this.k = prev_k;
         this.full_reduction_counter = prev_full_counter;
         this.fast_reduction_counter = prev_fast_counter;
+        // don't restore branch counter!
 
         // 2. Merge uv
-        let res2 = {
+        let mut res2 = {
             let uv = this.g.get(u, v);
             // TODO: Might not need this check after edge merging is in? Maybe?
             if uv.is_finite() {
@@ -759,6 +804,23 @@ impl<'a> ProblemInstance<'a> {
                         _imap_v,
                         this.k
                     );
+
+                    // If merging generated cost, we basically eliminated some amount of branches by doing this
+                    // set.
+                    if Self::remaining_branch_count(k_before_branch - 1.0)
+                        < Self::remaining_branch_count(this.k)
+                    {
+                        log::error!(
+                            "k_before_branch - 1.0: {}, this.k: {}",
+                            k_before_branch - 1.0,
+                            this.k
+                        );
+                    }
+                    if k_before_branch - 1.0 > this.k {
+                        this.branch_counter += Self::remaining_branch_count(k_before_branch - 1.0)
+                            - Self::remaining_branch_count(this.k);
+                    }
+
                     this.find_cluster_editing()
                 } else {
                     dbg_trace_indent!(
@@ -768,12 +830,26 @@ impl<'a> ProblemInstance<'a> {
                         _imap_u,
                         _imap_v
                     );
+
+                    if k_before_branch > 0.0 {
+                        this.branch_counter +=
+                            BigUint::from(2u32).pow((k_before_branch - 1.0).max(0.0) as usize);
+                    }
+
                     (false, this)
                 }
             } else {
+                // TODO: Is this one right?
+                panic!();
+                this.branch_counter +=
+                    BigUint::from(2u32).pow((k_before_branch - 1.0).max(0.0) as usize);
                 (false, this)
             }
         };
+
+        if k_before_branch.abs() < 0.001 {
+            res2.1.branch_counter += BigUint::one();
+        }
 
         res2
     }
