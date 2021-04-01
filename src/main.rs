@@ -1,6 +1,4 @@
-#![feature(str_split_once)]
-
-use cluster_editing::{algo, graph_writer, graphviz, parser, Graph, PetGraph, Weight};
+use cluster_editing::{algo, algo::Edit, graph_writer, graphviz, parser, Graph, PetGraph, Weight};
 
 use std::collections::HashMap;
 use std::error::Error;
@@ -70,6 +68,11 @@ struct Opt {
 
     #[structopt(short = "d", long = "debug", parse(try_from_str = parse_key_val), number_of_values = 1)]
     debug_options: Option<Vec<(String, String)>>,
+
+    /// Suppresses the output required by the challenge since it can get quite long and isn't
+    /// really necessary most of the time.
+    #[structopt(long = "noout", short = "n")]
+    no_out: bool,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -82,11 +85,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     let input_name;
 
     let graph: PetGraph = match opt.input {
-        Some(path) => {
+        // The optil.io website used for the PACE challenge seems to pass an empty string arg
+        // for some reason, this if guard ignores that.
+        Some(path) if path.to_str().map(|s| !s.trim().is_empty()).unwrap_or(false) => {
             input_name = path.display().to_string();
             parser::parse_file(path)
         }
-        None => {
+        Some(_) | None => {
             input_name = "stdin".to_string();
             parser::parse(std::io::stdin().lock())
         }
@@ -124,7 +129,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let start = Instant::now();
 
-    let result = algo::execute_algorithm(&graph, params);
+    let (result_graph, result_edits) = algo::execute_algorithm(&graph, params);
 
     let time = start.elapsed().as_secs_f32();
 
@@ -132,17 +137,27 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     info!(
         "Output graph has {} nodes and {} edges.",
-        result.node_count(),
-        result.edge_count()
+        result_graph.node_count(),
+        result_graph.edge_count()
     );
 
     if let Some(path) = opt.print_output {
-        graphviz::print_graph(&opt.print_command, path, &result);
+        graphviz::print_graph(&opt.print_command, path, &result_graph);
     }
 
     if let Some(spec) = opt.write_output {
-        write_graph(&Graph::<Weight>::new_from_petgraph(&result).0, &spec);
+        write_graph(&Graph::<Weight>::new_from_petgraph(&result_graph).0, &spec);
     }
+
+    if !opt.no_out {
+        for edit in result_edits {
+            match edit {
+                Edit::Insert(u, v) => println!("{} {}", u + 1, v + 1),
+                Edit::Delete(u, v) => println!("{} {}", u + 1, v + 1),
+            }
+        }
+    }
+
     Ok(())
 }
 

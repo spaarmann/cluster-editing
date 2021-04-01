@@ -85,7 +85,7 @@ impl Parameters {
     }
 }
 
-pub fn execute_algorithm(graph: &PetGraph, mut params: Parameters) -> PetGraph {
+pub fn execute_algorithm(graph: &PetGraph, mut params: Parameters) -> (PetGraph, Vec<Edit>) {
     let mut result = graph.clone();
     let (g, imap) = Graph::<Weight>::new_from_petgraph(&graph);
     let (components, _) = g.split_into_components(&imap);
@@ -206,7 +206,8 @@ pub fn execute_algorithm(graph: &PetGraph, mut params: Parameters) -> PetGraph {
         edits.len(),
         edits
     );
-    result
+
+    (result, edits)
 }
 
 // A bit of code that can be useful for debugging, so I'm leaving it here
