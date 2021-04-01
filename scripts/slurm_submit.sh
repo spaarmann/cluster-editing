@@ -7,7 +7,7 @@
 #       --mail-type=ALL							# ALL is useful for debugging,
 #SBATCH --mail-type=END,FAIL,REQUEUE    		# but a bit noisy when starting 80+ jobs at once. Still nice to be notified when something finishes or crashes though.
 #SBATCH --cpus-per-task=1						# `cluster-editing` is currently single-threaded, and we submit one job for a single instance each, so we only need one CPU/thread
-#SBATCH --mem-per-cpu=100        				# With the current non-cloning branching we need very little memory
+#SBATCH --mem-per-cpu=1000        				# With the current non-cloning branching we need very little memory
 #SBATCH --time=7-00:00:00						# days-hh:mm:ss time limit
 #SBATCH	--export=ALL                            # Propagate complete environment to job 
 #SBATCH --exclude=d[001-016]                    # excludes the nodes in the list (ranges may be used) from allocation; TUHH specific reason: because d0?? does not support the intrinsics of the other nodes and n0?? has bash problems (taken from HPC batch script by Jens M. Schmidt)

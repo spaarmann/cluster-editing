@@ -29,6 +29,29 @@ pub struct ConflictStore {
     edge_disjoint_mask: Vec<i32>,
     edge_disjoint_count: usize,
     graph_size: usize,
+
+    oplog: Vec<Op>,
+}
+
+#[derive(Clone)]
+pub enum Op {
+    SetConflict {
+        v: usize,
+        u: usize,
+        w: usize,
+    },
+    UnsetConflict {
+        v: usize,
+        u: usize,
+        w: usize,
+    },
+    AddEdgeDisjointConflict {
+        conflict_idx: usize,
+    },
+    RemoveEdgeDisjointConflict {
+        conflict: (usize, usize, usize),
+        conflict_idx: usize,
+    },
 }
 
 /* # Performance goals
@@ -116,6 +139,7 @@ impl ConflictStore {
             edge_disjoint_mask,
             edge_disjoint_count,
             graph_size: size,
+            oplog: Vec::new(),
         }
     }
 
@@ -201,6 +225,8 @@ impl ConflictStore {
         self.conflict_store[vuw_idx] = true;
         self.conflict_store[wuv_idx] = true;
 
+        self.oplog.push(Op::SetConflict { v, u, w });
+
         // If the new conflict can be added to our set of edge-disjoint conflicts, go and do so.
         let uv_idx = self.edge_idx(u, v);
         let uw_idx = self.edge_idx(u, w);
@@ -209,10 +235,13 @@ impl ConflictStore {
             && self.edge_disjoint_mask[uw_idx] == -1
             && self.edge_disjoint_mask[vw_idx] == -1
         {
-            let conflict_idx = self.edge_disjoint_list.len() as i32;
+            let conflict_idx = self.edge_disjoint_list.len();
             self.edge_disjoint_list.push(Some((v.min(w), u, v.max(w))));
-            self.set_edge_disjoint_conflict_mask(v, u, w, conflict_idx);
+            self.set_edge_disjoint_conflict_mask(v, u, w, conflict_idx as i32);
             self.edge_disjoint_count += 1;
+
+            self.oplog
+                .push(Op::AddEdgeDisjointConflict { conflict_idx });
         }
     }
 
@@ -228,6 +257,8 @@ impl ConflictStore {
             self.conflict_store[vuw_idx] = false;
             self.conflict_store[wuv_idx] = false;
 
+            self.oplog.push(Op::UnsetConflict { v, u, w });
+
             // If this conflict was part of our set of edge-disjoint conflicts, remove it from
             // that.
             let uv_idx = self.edge_idx(u, v);
@@ -240,12 +271,17 @@ impl ConflictStore {
                 && conflict_idx_uv == conflict_idx_uw
                 && conflict_idx_uv == conflict_idx_vw
             {
-                let _ = self.edge_disjoint_list[conflict_idx_uv as usize]
+                let conflict = self.edge_disjoint_list[conflict_idx_uv as usize]
                     .take()
                     .unwrap();
 
                 self.set_edge_disjoint_conflict_mask(v, u, w, -1);
                 self.edge_disjoint_count -= 1;
+
+                self.oplog.push(Op::RemoveEdgeDisjointConflict {
+                    conflict,
+                    conflict_idx: conflict_idx_uv as usize,
+                });
 
                 // TODO: Removing a conflict from the set here could enable us to add a new one
                 // instead, should definitely try if that's worth it.
@@ -366,6 +402,52 @@ impl ConflictStore {
             "Did not find a conflict, but conflict_count is {}",
             self.conflict_count
         );
+    }
+
+    pub fn oplog_len(&self) -> usize {
+        self.oplog.len()
+    }
+
+    pub fn rollback_to(&mut self, oplog_len: usize) {
+        for op in self.oplog.drain(oplog_len..).rev().collect::<Vec<_>>() {
+            match op {
+                Op::SetConflict { v, u, w } => {
+                    self.conflict_count -= 1;
+
+                    let vuw_idx = self.idx(v, u, w);
+                    let wuv_idx = self.idx(w, u, v);
+                    self.conflict_store[vuw_idx] = false;
+                    self.conflict_store[wuv_idx] = false;
+                }
+                Op::UnsetConflict { v, u, w } => {
+                    self.conflict_count += 1;
+
+                    let vuw_idx = self.idx(v, u, w);
+                    let wuv_idx = self.idx(w, u, v);
+                    self.conflict_store[vuw_idx] = true;
+                    self.conflict_store[wuv_idx] = true;
+                }
+                Op::AddEdgeDisjointConflict { conflict_idx } => {
+                    assert_eq!(conflict_idx + 1, self.edge_disjoint_list.len());
+                    let conflict = self.edge_disjoint_list.pop().unwrap().unwrap();
+                    self.set_edge_disjoint_conflict_mask(conflict.0, conflict.1, conflict.2, -1);
+                    self.edge_disjoint_count -= 1;
+                }
+                Op::RemoveEdgeDisjointConflict {
+                    conflict,
+                    conflict_idx,
+                } => {
+                    self.edge_disjoint_list[conflict_idx] = Some(conflict);
+                    self.set_edge_disjoint_conflict_mask(
+                        conflict.0,
+                        conflict.1,
+                        conflict.2,
+                        conflict_idx as i32,
+                    );
+                    self.edge_disjoint_count += 1;
+                }
+            }
+        }
     }
 
     #[inline(always)]
