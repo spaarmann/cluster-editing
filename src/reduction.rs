@@ -685,13 +685,13 @@ pub fn rule4(p: &mut ProblemInstance) -> bool {
         if max.1 > second.1 * 2.0 {
             let k_c = min_cut(&g, &c, first);
 
-            // TODO: This probably double-counts every edge?
             let sum_neg_internal = c
                 .iter()
                 .map(|&u| {
                     c.iter()
                         .map(|&v| {
-                            if u != v {
+                            // Don't count both uv and vu
+                            if u > v {
                                 g.get(u, v).min(Weight::ZERO).abs()
                             } else {
                                 Weight::ZERO
