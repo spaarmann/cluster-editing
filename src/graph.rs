@@ -91,7 +91,7 @@ impl<T: GraphWeight> Graph<T> {
     }
 
     /// Creates a petgraph graph from this graph and an optional IndexMap.
-    pub fn into_petgraph(
+    pub fn to_petgraph(
         &self,
         imap: Option<&IndexMap>,
         inverted_graph: bool,
@@ -103,7 +103,7 @@ impl<T: GraphWeight> Graph<T> {
         let mut map = vec![NodeIndex::new(0); self.size];
         for u in 0..self.size {
             if self.present[u] {
-                map[u] = pg.add_node(imap.map(|m| m[u].clone()).unwrap_or(vec![u]));
+                map[u] = pg.add_node(imap.map(|m| m[u].clone()).unwrap_or_else(|| vec![u]));
             }
         }
 

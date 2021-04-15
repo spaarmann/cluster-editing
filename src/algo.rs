@@ -10,7 +10,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{prelude::*, BufWriter};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use log::info;
 use petgraph::graph::NodeIndex;
@@ -109,9 +109,11 @@ pub fn execute_algorithm(graph: &PetGraph, mut params: Parameters) -> (PetGraph,
         }
 
         if params.stats_dir.is_some() {
-            let mut comp_statistics = ComponentStatistics::default();
-            comp_statistics.component_node_count = cg.present_node_count();
-            comp_statistics.component_edge_count = cg.edge_count();
+            let comp_statistics = ComponentStatistics {
+                component_node_count: cg.present_node_count(),
+                component_edge_count: cg.edge_count(),
+                ..Default::default()
+            };
             params.stats = RefCell::new(comp_statistics);
         }
 
@@ -691,7 +693,7 @@ impl<'a> ProblemInstance<'a> {
             let uv = self.g.get(u, v);
             // TODO: Might not need this check after edge merging is in? Maybe?
             if uv.is_finite() {
-                self.k = self.k - uv as f32;
+                self.k -= uv as f32;
 
                 if self.k >= 0.0 {
                     dbg_trace_indent!(
@@ -794,6 +796,7 @@ impl<'a> ProblemInstance<'a> {
 
     /// Merge u and v. The merged vertex becomes the new vertex at index u in the graph, while v is
     /// marked as not present anymore.
+    #[allow(clippy::collapsible_else_if)]
     pub fn merge(&mut self, u: usize, v: usize) {
         assert!(self.g.is_present(u));
         assert!(self.g.is_present(v));
@@ -888,7 +891,7 @@ impl<'a> ProblemInstance<'a> {
         if (uw + vw).is_zero() {
             self.k -= uw as f32 - 0.5;
             self.make_delete_edit(u, w);
-            return Weight::ZERO;
+            Weight::ZERO
         } else {
             if uw > -vw {
                 self.k -= -vw as f32;
@@ -897,12 +900,12 @@ impl<'a> ProblemInstance<'a> {
                 self.k -= uw as f32;
                 self.make_delete_edit(u, w);
             }
-            return uw + vw;
+            uw + vw
         }
     }
 }
 
-fn write_stat_initial(stats_dir: &PathBuf, stats: &ComponentStatistics, component_index: usize) {
+fn write_stat_initial(stats_dir: &Path, stats: &ComponentStatistics, component_index: usize) {
     std::fs::create_dir_all(stats_dir).unwrap();
 
     let info_path = stats_dir.join(format!("comp_{}_info.stats", component_index));
@@ -920,7 +923,7 @@ fn write_stat_initial(stats_dir: &PathBuf, stats: &ComponentStatistics, componen
 }
 
 fn write_stat_block(
-    stats_dir: &PathBuf,
+    stats_dir: &Path,
     stats: &ComponentStatistics,
     component_index: usize,
     k_max: usize,

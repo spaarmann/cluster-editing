@@ -782,14 +782,12 @@ pub fn rule5(p: &mut ProblemInstance) -> bool {
                 if x.is_finite() {
                     max_x += x.abs();
                 }
+            } else if x_edge {
+                delta_u += x;
+                delta_v -= y;
             } else {
-                if x_edge {
-                    delta_u += x;
-                    delta_v -= y;
-                } else {
-                    delta_u -= x;
-                    delta_v += y;
-                }
+                delta_u -= x;
+                delta_v += y;
             }
         }
 
@@ -802,6 +800,7 @@ pub fn rule5(p: &mut ProblemInstance) -> bool {
         }
     }
 
+    #[allow(clippy::needless_range_loop)]
     fn compute_max(
         d: &R5Data,
         m: &mut Vec<Option<isize>>,
@@ -1091,6 +1090,8 @@ fn induced_cost_reduction(p: &mut ProblemInstance) {
                 }
             }
 
+            // TODO: Could try skipping the bound calculation if icp/icf with the weight of uv
+            // itself is *already* larger k.
             let bound = p
                 .conflicts
                 .min_cost_to_resolve_edge_disjoint_conflicts_ignoring(&p.g, u, v);

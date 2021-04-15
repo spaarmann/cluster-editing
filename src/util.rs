@@ -74,7 +74,7 @@ macro_rules! continue_if_not_present {
     };
 }
 
-pub trait InfiniteNum {
+pub trait InfiniteNum: Copy {
     const INFINITY: Self;
     const NEG_INFINITY: Self;
     fn is_finite(self) -> bool;

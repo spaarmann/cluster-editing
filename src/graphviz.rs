@@ -8,7 +8,7 @@ use std::fmt::{Debug, Display};
 use std::io::Write;
 use std::process::{Command, Stdio};
 
-pub fn print_graph<'a, G, P: AsRef<std::path::Path>>(command: &str, path: P, graph: G)
+pub fn print_graph<G, P: AsRef<std::path::Path>>(command: &str, path: P, graph: G)
 where
     G: GraphRef + IntoNodeReferences + IntoEdgeReferences + NodeIndexable + GraphProp + NodeCount,
     G::EdgeWeight: Display,
@@ -24,7 +24,7 @@ where
     print(command, path, &dot.to_string());
 }
 
-pub fn print_debug_graph<'a, G, P: AsRef<std::path::Path>>(command: &str, path: P, graph: G)
+pub fn print_debug_graph<G, P: AsRef<std::path::Path>>(command: &str, path: P, graph: G)
 where
     G: GraphRef + IntoNodeReferences + IntoEdgeReferences + NodeIndexable + GraphProp + NodeCount,
     G::EdgeWeight: Debug,

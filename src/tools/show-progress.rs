@@ -1,3 +1,5 @@
+#![allow(clippy::redundant_pattern_matching)]
+
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs::File;

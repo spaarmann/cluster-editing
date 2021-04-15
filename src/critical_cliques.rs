@@ -14,7 +14,7 @@ pub struct CritCliqueGraph {
 }
 
 impl CritCliqueGraph {
-    pub fn into_petgraph(&self) -> petgraph::Graph<String, u8, petgraph::Undirected, u32> {
+    pub fn to_petgraph(&self) -> petgraph::Graph<String, u8, petgraph::Undirected, u32> {
         use petgraph::prelude::NodeIndex;
 
         let mut pg = petgraph::Graph::with_capacity(self.graph.size(), 0);

@@ -52,8 +52,8 @@ where
         }
     }
 
-    let n = n.ok_or(make_error("could not read vertex count"))?;
-    let m = m.ok_or(make_error("could not read edge count"))?;
+    let n = n.ok_or_else(|| make_error("could not read vertex count"))?;
+    let m = m.ok_or_else(|| make_error("could not read edge count"))?;
 
     let mut graph = G::with_capacity(n, m);
 
@@ -72,11 +72,11 @@ where
         let u = split
             .next()
             .and_then(|s| s.parse::<usize>().ok())
-            .ok_or(make_error("invalid edge format"))?;
+            .ok_or_else(|| make_error("invalid edge format"))?;
         let v = split
             .next()
             .and_then(|s| s.parse::<usize>().ok())
-            .ok_or(make_error("invalid edge format"))?;
+            .ok_or_else(|| make_error("invalid edge format"))?;
 
         graph.add_edge(node_ids[u - 1], node_ids[v - 1], Default::default());
     }

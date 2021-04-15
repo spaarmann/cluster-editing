@@ -110,13 +110,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     if let Some(path) = opt.print_cliques {
         let (graph, _) = Graph::new_from_petgraph(&graph);
         let crit_graph = cluster_editing::critical_cliques::build_crit_clique_graph(&graph);
-        graphviz::print_graph(&opt.print_command, path, &crit_graph.into_petgraph());
+        graphviz::print_graph(&opt.print_command, path, &crit_graph.to_petgraph());
     }
 
     let debug_opts = opt
         .debug_options
         .map(|o| o.into_iter().collect())
-        .unwrap_or_else(|| HashMap::new());
+        .unwrap_or_else(HashMap::new);
 
     let params = algo::Parameters::new(
         opt.full_reduction_interval,

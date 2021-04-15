@@ -128,7 +128,7 @@ impl ConflictStore {
 
         debug_assert!(count % 2 == 0, "Conflicts always occur in symmetric pairs");
 
-        count = count / 2;
+        count /= 2;
 
         let edge_disjoint_count = edge_disjoint_list.len();
 
@@ -312,6 +312,7 @@ impl ConflictStore {
         self.edge_disjoint_count
     }
 
+    #[allow(clippy::collapsible_else_if)]
     pub fn min_cost_to_resolve_edge_disjoint_conflicts<T: GraphWeight>(&self, g: &Graph<T>) -> T {
         let mut sum = T::ZERO;
 
@@ -342,6 +343,7 @@ impl ConflictStore {
         sum
     }
 
+    #[allow(clippy::collapsible_else_if)]
     pub fn min_cost_to_resolve_edge_disjoint_conflicts_ignoring<T: GraphWeight>(
         &self,
         g: &Graph<T>,

@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -81,10 +81,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn do_file(
-    command: &PathBuf,
+    command: &Path,
     args: &str,
-    in_path: &PathBuf,
-    out_dir: &PathBuf,
+    in_path: &Path,
+    out_dir: &Path,
     timeout: u64,
 ) -> (bool, f32) {
     let filename = in_path
@@ -98,7 +98,7 @@ fn do_file(
     let now = Instant::now();
     let mut command = Command::new(command);
     let args = args.replace("$i", filename);
-    if args.len() > 0 {
+    if !args.is_empty() {
         command.args(args.split(' '));
     }
     let mut child = command
@@ -164,7 +164,7 @@ fn do_file(
         }
     };
 
-    let mut output_path = out_dir.clone();
+    let mut output_path = out_dir.to_path_buf();
     output_path.push(format!("{}.out", filename));
     let mut output_file = File::create(output_path).unwrap();
 
