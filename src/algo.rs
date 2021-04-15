@@ -122,7 +122,9 @@ pub fn execute_algorithm(graph: &PetGraph, mut params: Parameters) -> (PetGraph,
         }
 
         info!("Solving component {}...", i);
-        let (k, edits) = find_optimal_cluster_editing(&cg, &imap, &params, i);
+        let (k, cg_res, imap_res) /*, edits)*/ = find_optimal_cluster_editing(&cg, &imap, &params, i);
+
+        let edits = diff_graphs(&cg, &imap, &cg_res, &imap_res);
 
         info!(
             "Found a cluster editing with k={} and {} edits for component {}: {:?}",
@@ -212,6 +214,50 @@ pub fn execute_algorithm(graph: &PetGraph, mut params: Parameters) -> (PetGraph,
     (result, edits)
 }
 
+fn diff_graphs(
+    first: &Graph<Weight>,
+    first_imap: &IndexMap,
+    second: &Graph<Weight>,
+    second_imap: &IndexMap,
+) -> Vec<Edit> {
+    let find_in_second = |in_first: usize| {
+        // TODO: In theory this should be able to support first_imap not being a 1:1 mapping too,
+        // but we don't need it to right now.
+        // (Note that this assumption is also made in the match further down.)
+        assert!(first_imap[in_first].len() == 1);
+
+        for in_second in second.nodes() {
+            if second_imap[in_second].contains(&first_imap[in_first][0]) {
+                return in_second;
+            }
+        }
+        panic!("Did not find node in second: {}", in_first);
+    };
+
+    let mut edits = Vec::new();
+
+    for u in first.nodes() {
+        let u_in_second = find_in_second(u);
+
+        for v in (u + 1)..first.size() {
+            continue_if_not_present!(first, v);
+
+            let v_in_second = find_in_second(v);
+
+            let first_has_edge = first.has_edge(u, v);
+            let second_has_edge =
+                u_in_second == v_in_second || second.has_edge(u_in_second, v_in_second);
+            match (first_has_edge, second_has_edge) {
+                (true, false) => edits.push(Edit::Delete(first_imap[u][0], first_imap[v][0])),
+                (false, true) => edits.push(Edit::Insert(first_imap[u][0], first_imap[v][0])),
+                _ => {}
+            }
+        }
+    }
+
+    edits
+}
+
 // A bit of code that can be useful for debugging, so I'm leaving it here
 // commented out for now.
 // When using it, remember to also comment in the line further up that sets
@@ -283,7 +329,8 @@ pub fn find_optimal_cluster_editing(
     imap: &IndexMap,
     params: &Parameters,
     comp_index: usize,
-) -> (i32, Vec<Edit>) {
+) -> (i32, Graph<Weight>, IndexMap) {
+    //, Vec<Edit>) {
     // TODO: Not sure if executing the algo once with k = 0 is the best
     // way of handling already-disjoint-clique-components.
 
@@ -317,12 +364,13 @@ pub fn find_optimal_cluster_editing(
         let mut instance = instance.fork_new_branch();
         instance.k = only_k as f32;
         instance.k_max = only_k as f32;
-        if let (true, instance) = instance.find_cluster_editing() {
+        let (success, instance) = instance.find_cluster_editing();
+        if success {
             log::info!("Found solution, final path log:\n{}", instance.path_log);
-            return (instance.k as i32, instance.edits);
+            return (instance.k as i32, instance.g, instance.imap); //, edits);
         } else {
             log::warn!("Found no solution!");
-            return (0, Vec::new());
+            return (0, instance.g, instance.imap); //, Vec::new());
         }
     }
 
@@ -348,7 +396,7 @@ pub fn find_optimal_cluster_editing(
                 log::info!("Final path debug log:\n{}", instance.path_log);
             }
 
-            return (instance.k as i32, instance.edits);
+            return (instance.k as i32, instance.g, instance.imap); //, instance.edits);
         }
 
         k += 1.0;
@@ -365,7 +413,7 @@ pub struct ProblemInstance<'a> {
     pub k_max: f32,
     pub full_reduction_counter: i32,
     pub fast_reduction_counter: i32,
-    pub edits: Vec<Edit>,
+    //pub edits: Vec<Edit>,
     pub path_log: String,
     // Helpers for `reduction`, stored here to avoid allocating new ones as much.
     pub r: Option<reduction::ReductionStorage>,
@@ -383,7 +431,7 @@ impl<'a> ProblemInstance<'a> {
             k_max: 0.0,
             full_reduction_counter: 0,
             fast_reduction_counter: 0,
-            edits: Vec::new(),
+            //edits: Vec::new(),
             path_log: String::new(),
             r: Some(Default::default()),
         }
@@ -678,7 +726,7 @@ impl<'a> ProblemInstance<'a> {
             self.imap[_w]
         );
 
-        let edit_len = self.edits.len();
+        //let edit_len = self.edits.len();
         let oplog_len = self.g.oplog_len();
         let path_len = self.path_log.len();
         let prev_imap = self.imap.clone();
@@ -735,7 +783,7 @@ impl<'a> ProblemInstance<'a> {
             return (true, this);
         }
 
-        this.edits.truncate(edit_len);
+        //this.edits.truncate(edit_len);
         this.g.rollback_to(oplog_len);
         this.path_log.truncate(path_len);
         this.imap = prev_imap;
@@ -785,12 +833,13 @@ impl<'a> ProblemInstance<'a> {
     // anything that calls them is still responsible for updating `k` appropriately.
     // (And also for actually setting any values in the graph.)
 
+    // TODO: If we keep not tracking edits, these methods are a bit stupid
     pub fn make_insert_edit(&mut self, u: usize, v: usize) {
-        Edit::insert(&mut self.edits, &self.imap, u, v);
+        //Edit::insert(&mut self.edits, &self.imap, u, v);
         self.conflicts.update_for_insert(&self.g, u, v);
     }
     pub fn make_delete_edit(&mut self, u: usize, v: usize) {
-        Edit::delete(&mut self.edits, &self.imap, u, v);
+        //Edit::delete(&mut self.edits, &self.imap, u, v);
         self.conflicts.update_for_delete(&self.g, u, v);
     }
 
@@ -802,7 +851,7 @@ impl<'a> ProblemInstance<'a> {
         assert!(self.g.is_present(v));
 
         let _start_k = self.k;
-        let _start_edit_len = self.edits.len();
+        //let _start_edit_len = self.edits.len();
 
         let uv = self.g.get(u, v);
         if uv < Weight::ZERO {
