@@ -1,3 +1,4 @@
+use bitvec::prelude::*;
 use std::ops::{Add, AddAssign, Neg};
 
 pub trait GraphWeight: PartialOrd + Copy + Add + AddAssign + Neg<Output = Self> {
@@ -49,7 +50,7 @@ pub struct Graph<T: GraphWeight> {
     /// performance reasons.
     /// Any users of this struct that iterate manually over some index range must check themself
     /// whether a vertex is removed, using `.is_present(u)`.
-    present: Vec<bool>,
+    present: BitVec,
     present_count: usize,
     oplog: Vec<Op<T>>,
 }
@@ -64,7 +65,7 @@ impl<T: GraphWeight> Graph<T> {
         Graph {
             size,
             matrix: vec![T::NEG_ONE; mat_size],
-            present: vec![true; size],
+            present: bitvec![1; size],
             present_count: size,
             oplog: Vec::new(),
         }
@@ -230,7 +231,7 @@ impl<T: GraphWeight> Graph<T> {
 
     pub fn set_not_present(&mut self, u: usize) {
         assert!(self.present[u]);
-        self.present[u] = false;
+        self.present.set(u, false);
         self.present_count -= 1;
 
         self.oplog.push(Op::NotPresent(u));
@@ -249,7 +250,7 @@ impl<T: GraphWeight> Graph<T> {
                     self.matrix[v * self.size + u] = prev;
                 }
                 Op::NotPresent(u) => {
-                    self.present[u] = true;
+                    self.present.set(u, true);
                     self.present_count += 1;
                 }
             }
