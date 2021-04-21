@@ -2,6 +2,8 @@ use crate::graph::{Graph, GraphWeight};
 
 use std::ops::Not;
 
+use bitvec::prelude::*;
+
 /// Effeciently maintains a collection of conflict triples (nodes v-u-w where uv and uw are edges,
 /// but vw is a non-edge).
 ///
@@ -21,7 +23,7 @@ pub struct ConflictStore {
     // This is symmetric in the outer two indices, i.e.
     // `conflicts[idx(v, u, w)] == conflicts[idx(w, u, v)]`, but not in other permutations of the
     // indices.
-    conflict_store: Vec<bool>,
+    conflict_store: BitVec,
     conflict_count: usize,
     // List of edge-disjoint conflicts in the graph.
     edge_disjoint_list: Vec<Option<(usize, usize, usize)>>,
@@ -69,7 +71,7 @@ pub enum Op {
 impl ConflictStore {
     pub fn new_for_graph<T: GraphWeight>(g: &Graph<T>) -> Self {
         let size = g.size();
-        let mut conflict_store = vec![false; size * size * size];
+        let mut conflict_store = bitvec![0; size * size * size];
         let mut count = 0;
         let mut edge_disjoint_mask = vec![-1; size * size];
         let mut edge_disjoint_list = Vec::new();
@@ -102,7 +104,7 @@ impl ConflictStore {
                     let vw = g.has_edge(v, w);
 
                     if uw && !vw {
-                        conflict_store[Self::idx_with_size(size, v, u, w)] = true;
+                        conflict_store.set(Self::idx_with_size(size, v, u, w), true);
                         count += 1;
 
                         let uv_idx = Self::edge_idx_with_size(size, u, v);
@@ -222,8 +224,8 @@ impl ConflictStore {
         debug_assert!(self.conflict_store[wuv_idx].not());
 
         self.conflict_count += 1;
-        self.conflict_store[vuw_idx] = true;
-        self.conflict_store[wuv_idx] = true;
+        self.conflict_store.set(vuw_idx, true);
+        self.conflict_store.set(wuv_idx, true);
 
         self.oplog.push(Op::SetConflict { v, u, w });
 
@@ -254,8 +256,8 @@ impl ConflictStore {
             debug_assert!(self.conflict_store[wuv_idx]);
 
             self.conflict_count -= 1;
-            self.conflict_store[vuw_idx] = false;
-            self.conflict_store[wuv_idx] = false;
+            self.conflict_store.set(vuw_idx, false);
+            self.conflict_store.set(wuv_idx, false);
 
             self.oplog.push(Op::UnsetConflict { v, u, w });
 
@@ -418,16 +420,16 @@ impl ConflictStore {
 
                     let vuw_idx = self.idx(v, u, w);
                     let wuv_idx = self.idx(w, u, v);
-                    self.conflict_store[vuw_idx] = false;
-                    self.conflict_store[wuv_idx] = false;
+                    self.conflict_store.set(vuw_idx, false);
+                    self.conflict_store.set(wuv_idx, false);
                 }
                 Op::UnsetConflict { v, u, w } => {
                     self.conflict_count += 1;
 
                     let vuw_idx = self.idx(v, u, w);
                     let wuv_idx = self.idx(w, u, v);
-                    self.conflict_store[vuw_idx] = true;
-                    self.conflict_store[wuv_idx] = true;
+                    self.conflict_store.set(vuw_idx, true);
+                    self.conflict_store.set(wuv_idx, true);
                 }
                 Op::AddEdgeDisjointConflict { conflict_idx } => {
                     assert_eq!(conflict_idx + 1, self.edge_disjoint_list.len());
