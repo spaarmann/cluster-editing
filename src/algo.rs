@@ -40,7 +40,7 @@ impl Edit {
 }
 
 #[derive(Default, Debug)]
-struct ComponentStatistics {
+pub struct ComponentStatistics {
     // fast_param_indep_reduction[max_k][k] = x => in the run starting with k=max_k, at k=k
     // the fast reduction achieved a reduction in `k` of `x`.
     fast_param_indep_reduction: HashMap<usize, HashMap<FloatKey, f32>>,
@@ -54,6 +54,14 @@ struct ComponentStatistics {
     initial_reduction: usize,
     component_node_count: usize,
     component_edge_count: usize,
+
+    pub k_red_from_branching: f32,
+    pub k_red_from_rules123: f32,
+    pub k_red_from_rule4: f32,
+    pub k_red_from_rule5: f32,
+    pub k_red_from_ind_cost: f32,
+    pub k_red_from_early_exit: f32,
+    pub k_red_from_zeroes: f32,
 }
 
 #[derive(Debug, Default)]
@@ -65,7 +73,7 @@ pub struct Parameters {
 
     // This doesn't really belong here, but it's a convenient place
     // to access from everywhere, throughout the whole algorithm.
-    stats: RefCell<ComponentStatistics>,
+    pub stats: RefCell<ComponentStatistics>,
 }
 
 impl Parameters {
@@ -85,7 +93,7 @@ impl Parameters {
     }
 }
 
-pub fn execute_algorithm(graph: &PetGraph, mut params: Parameters) -> (PetGraph, Vec<Edit>) {
+pub fn execute_algorithm(graph: &PetGraph, params: &mut Parameters) -> (PetGraph, Vec<Edit>) {
     let mut result = graph.clone();
     let (g, imap) = Graph::<Weight>::new_from_petgraph(&graph);
     let (components, _) = g.split_into_components(&imap);
@@ -411,6 +419,8 @@ impl<'a> ProblemInstance<'a> {
                 self.conflicts.edge_disjoint_conflict_count(),
                 self.k
             );
+
+            self.params.stats.borrow_mut().k_red_from_early_exit += self.k.max(0.0);
             return (false, self);
         }
 
@@ -537,7 +547,7 @@ impl<'a> ProblemInstance<'a> {
 
             let k_before_indep_reduction = self.k;
             if self.full_reduction_counter == 0 {
-                reduction::full_param_independent_reduction(&mut self);
+                reduction::full_param_independent_reduction(&mut self, false);
                 self.full_reduction_counter = self.params.full_reduction_interval;
 
                 if self.params.stats_dir.is_some() {
@@ -590,6 +600,8 @@ impl<'a> ProblemInstance<'a> {
                     self.conflicts.edge_disjoint_conflict_count(),
                     self.k
                 );
+
+                self.params.stats.borrow_mut().k_red_from_early_exit += self.k.max(0.0);
                 return (false, self);
             }
         }
@@ -645,6 +657,7 @@ impl<'a> ProblemInstance<'a> {
                 }
 
                 self.k -= zero_count / 2.0;
+                self.params.stats.borrow_mut().k_red_from_zeroes += zero_count / 2.0;
 
                 dbg_trace_indent!(
                     self,
@@ -694,6 +707,7 @@ impl<'a> ProblemInstance<'a> {
             // TODO: Might not need this check after edge merging is in? Maybe?
             if uv.is_finite() {
                 self.k -= uv as f32;
+                self.params.stats.borrow_mut().k_red_from_branching += uv as f32;
 
                 if self.k >= 0.0 {
                     dbg_trace_indent!(
@@ -752,6 +766,8 @@ impl<'a> ProblemInstance<'a> {
                 let _imap_u = this.imap[u].clone();
                 let _imap_v = this.imap[v].clone();
                 this.merge(u, v);
+
+                this.params.stats.borrow_mut().k_red_from_branching += prev_k - this.k;
 
                 if this.k >= 0.0 {
                     trace_and_path_log!(

@@ -32,7 +32,7 @@ pub fn initial_param_independent_reduction(p: &mut ProblemInstance) -> f32 {
 
     let k_start = (p.g.size() / 4) as f32;
 
-    full_param_independent_reduction(p);
+    full_param_independent_reduction(p, true);
 
     // TODO: It would seem that merging steps above could potentially result in zero-edges in the
     // graph. The algorithm is generally described as requiring that *no* zero-edges are in the
@@ -69,6 +69,8 @@ pub fn param_dependent_reduction(p: &mut ProblemInstance) {
 
     induced_cost_reduction(p);
 
+    p.params.stats.borrow_mut().k_red_from_ind_cost += _k_start - p.k;
+
     dbg_trace_indent!(
         p,
         _k_start,
@@ -82,7 +84,7 @@ pub fn param_dependent_reduction(p: &mut ProblemInstance) {
 /// Experiments", 2011
 /// Can be applied during the search as well, can modify `k` appropriately and don't require any
 /// specific form of the input.
-pub fn full_param_independent_reduction(p: &mut ProblemInstance) {
+pub fn full_param_independent_reduction(p: &mut ProblemInstance, is_initial: bool) {
     let _k_start = p.k;
     dbg_trace_indent!(
         p,
@@ -96,22 +98,37 @@ pub fn full_param_independent_reduction(p: &mut ProblemInstance) {
     while applied_any_rule && p.k > 0.0 && p.g.present_node_count() > 1 {
         applied_any_rule = false;
 
+        let k_before = p.k;
         // Don't repeatedly apply rules123 by themselves, one call will do all possible
         // applications.
         rules123(p);
 
+        if !is_initial {
+            p.params.stats.borrow_mut().k_red_from_rules123 += k_before - p.k;
+        }
+
+        let k_before = p.k;
         // Rule 4
         while rule4(p) {
             applied_any_rule = true;
+        }
+
+        if !is_initial {
+            p.params.stats.borrow_mut().k_red_from_rule4 += k_before - p.k;
         }
 
         if applied_any_rule {
             continue;
         }
 
+        let k_before = p.k;
         // Rule 5
         // TODO: Try looping this?
         applied_any_rule = rule5(p);
+
+        if !is_initial {
+            p.params.stats.borrow_mut().k_red_from_rule5 += k_before - p.k;
+        }
     }
 
     dbg_trace_indent!(
@@ -137,6 +154,7 @@ pub fn fast_param_independent_reduction(p: &mut ProblemInstance) {
     );
 
     rules123(p);
+    p.params.stats.borrow_mut().k_red_from_rule4 += _k_start - p.k;
 
     dbg_trace_indent!(
         p,
@@ -1111,9 +1129,13 @@ fn induced_cost_reduction(p: &mut ProblemInstance) {
                 if uv > Weight::ZERO {
                     p.k -= uv;
                     p.make_delete_edit(u, v);
+
+                    p.params.stats.borrow_mut().k_red_from_ind_cost += uv;
                 }
                 if uv.abs() < 0.001 {
                     p.k -= 0.5;
+
+                    p.params.stats.borrow_mut().k_red_from_zeroes += 0.5;
                 }
 
                 p.g.set(u, v, Weight::NEG_INFINITY);
@@ -1143,7 +1165,10 @@ fn induced_cost_reduction(p: &mut ProblemInstance) {
                     p.k
                 );
 
+                let k_before = p.k;
                 p.merge(u, v);
+
+                p.params.stats.borrow_mut().k_red_from_ind_cost += k_before - p.k;
 
                 if p.k <= 0.0 {
                     return;
