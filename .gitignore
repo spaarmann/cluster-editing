@@ -3,8 +3,8 @@
 /input.png
 /output.png
 /runner_out
-/.Rhistory
-/data/.Rhistory
+*.Rhistory
+*.RData
 /tests
 /last_full_run
 /stats
