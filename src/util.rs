@@ -1,3 +1,4 @@
+use crate::{algo::Edit, graph::IndexMap, Graph, Weight};
 use std::hash;
 
 macro_rules! append_path_log {
@@ -74,6 +75,52 @@ macro_rules! continue_if_not_present {
     };
 }
 
+pub fn diff_graphs(
+    first: &Graph<Weight>,
+    first_imap: &IndexMap,
+    second: &Graph<Weight>,
+    second_imap: &IndexMap,
+) -> Vec<Edit> {
+    let find_in_second = |in_first: usize| {
+        // TODO: In theory this should be able to support first_imap not being a 1:1 mapping too,
+        // but we don't need it to right now.
+        // (Note that this assumption is also made in the match further down.)
+        assert!(first_imap[in_first].len() == 1);
+
+        for in_second in second.nodes() {
+            if second_imap[in_second].contains(&first_imap[in_first][0]) {
+                return in_second;
+            }
+        }
+        panic!("Did not find node in second: {}", in_first);
+    };
+
+    let mut edits = Vec::new();
+
+    for u in first.nodes() {
+        let u_in_second = find_in_second(u);
+
+        for v in (u + 1)..first.size() {
+            if !first.is_present(v) {
+                continue;
+            }
+
+            let v_in_second = find_in_second(v);
+
+            let first_has_edge = first.has_edge(u, v);
+            let second_has_edge =
+                u_in_second == v_in_second || second.has_edge(u_in_second, v_in_second);
+            match (first_has_edge, second_has_edge) {
+                (true, false) => edits.push(Edit::Delete(first_imap[u][0], first_imap[v][0])),
+                (false, true) => edits.push(Edit::Insert(first_imap[u][0], first_imap[v][0])),
+                _ => {}
+            }
+        }
+    }
+
+    edits
+}
+
 pub trait InfiniteNum: Copy {
     const INFINITY: Self;
     const NEG_INFINITY: Self;
@@ -111,7 +158,7 @@ impl InfiniteNum for f32 {
 /// Provides an f32 wrapper that is Hash and Eq to use as a HashMap key.
 /// Uses bit-by-bit equality for hashing and comparisons; be very sure you want to use this
 /// and understand the problems.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct FloatKey(pub f32);
 
 impl FloatKey {

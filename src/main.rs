@@ -1,4 +1,7 @@
-use cluster_editing::{algo, algo::Edit, graph_writer, graphviz, parser, Graph, PetGraph, Weight};
+use cluster_editing::{
+    algo, algo::Edit, algo::ProblemInstance, graph_writer, graphviz, parser, Graph, PetGraph,
+    Weight,
+};
 
 use std::collections::HashMap;
 use std::error::Error;
@@ -43,7 +46,7 @@ struct Opt {
 
     /// Writes the output graph file out in another format.
     /// Syntax: `--write-output <format>:<path>.
-    /// Supported formats are: `tgf`, `peace`, `gr.
+    /// Supported formats are: `tgf`, `peace`, `gr`.
     #[structopt(long = "write-output")]
     write_output: Option<String>,
 
@@ -51,6 +54,11 @@ struct Opt {
     /// Requires a working graphviz installation accessible in the path.
     #[structopt(long = "print-cliques", parse(from_os_str))]
     print_cliques: Option<PathBuf>,
+
+    /// Print the graph after initial parameter-independent reduction, as a PNG file.
+    /// Requires a working graphviz installation accessible in the path.
+    #[structopt(long = "print-reduced", parse(from_os_str))]
+    print_reduced: Option<PathBuf>,
 
     /// Which command is used to print the graph images. Can generally be any Graphviz tool,
     /// default is `sfdp`. `fdp` can be used for somewhat better images that take a longer time to
@@ -133,6 +141,19 @@ fn main() -> Result<(), Box<dyn Error>> {
         debug_opts,
         opt.stats_dir,
     );
+
+    if let Some(path) = opt.print_reduced {
+        let (graph, imap) = Graph::new_from_petgraph(&graph);
+        let mut instance = ProblemInstance::new(&params, graph.clone(), imap.clone());
+        instance.k = f32::MAX;
+        instance.k_max = f32::MAX;
+        cluster_editing::reduction::initial_param_independent_reduction(&mut instance);
+        graphviz::print_graph_vecs(
+            &opt.print_command,
+            path,
+            &instance.g.to_petgraph(Some(&instance.imap), false),
+        );
+    }
 
     info!("Running with parameters: {:?}", params);
 

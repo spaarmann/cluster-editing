@@ -24,6 +24,22 @@ where
     print(command, path, &dot.to_string());
 }
 
+pub fn print_graph_vecs<G, P: AsRef<std::path::Path>>(command: &str, path: P, graph: G)
+where
+    G: GraphRef + IntoNodeReferences + IntoEdgeReferences + NodeIndexable + GraphProp + NodeCount,
+    G::EdgeWeight: Display + Debug,
+    G::NodeWeight: Debug,
+{
+    info!(
+        "Writing graph image to {}, graph has {} nodes",
+        path.as_ref().display(),
+        graph.node_count()
+    );
+
+    let dot = Dot::with_config(graph, &[Config::EdgeNoLabel]);
+    print(command, path, &format!("{:?}", dot));
+}
+
 pub fn print_debug_graph<G, P: AsRef<std::path::Path>>(command: &str, path: P, graph: G)
 where
     G: GraphRef + IntoNodeReferences + IntoEdgeReferences + NodeIndexable + GraphProp + NodeCount,

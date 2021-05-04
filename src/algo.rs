@@ -39,7 +39,7 @@ impl Edit {
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct ComponentStatistics {
     // fast_param_indep_reduction[max_k][k] = x => in the run starting with k=max_k, at k=k
     // the fast reduction achieved a reduction in `k` of `x`.
@@ -64,7 +64,7 @@ pub struct ComponentStatistics {
     pub k_red_from_zeroes: f32,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Parameters {
     pub full_reduction_interval: i32,
     pub fast_reduction_interval: i32,

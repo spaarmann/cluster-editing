@@ -1,8 +1,6 @@
 use cluster_editing::{
-    algo::{Edit, Parameters, ProblemInstance},
-    critical_cliques,
-    graph::IndexMap,
-    parser, reduction, Graph, PetGraph, Weight,
+    algo::{Parameters, ProblemInstance},
+    critical_cliques, parser, reduction, Graph, PetGraph,
 };
 
 use std::collections::HashMap;
@@ -115,7 +113,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
 
             after += instance.g.present_node_count();
-            edits += diff_graphs(&cg, &imap, &instance.g, &instance.imap).len();
+            edits +=
+                cluster_editing::util::diff_graphs(&cg, &imap, &instance.g, &instance.imap).len();
         }
 
         reduction_amounts.insert(filename.to_string(), (before, after, edits));
@@ -143,50 +142,4 @@ pub fn crit_clique_reduction(p: &mut ProblemInstance) {
     let (g, imap) = critical_cliques::merge_cliques(&p.g, &p.imap, &mut p.path_log);
     p.g = g;
     p.imap = imap;
-}
-
-fn diff_graphs(
-    first: &Graph<Weight>,
-    first_imap: &IndexMap,
-    second: &Graph<Weight>,
-    second_imap: &IndexMap,
-) -> Vec<Edit> {
-    let find_in_second = |in_first: usize| {
-        // TODO: In theory this should be able to support first_imap not being a 1:1 mapping too,
-        // but we don't need it to right now.
-        // (Note that this assumption is also made in the match further down.)
-        assert!(first_imap[in_first].len() == 1);
-
-        for in_second in second.nodes() {
-            if second_imap[in_second].contains(&first_imap[in_first][0]) {
-                return in_second;
-            }
-        }
-        panic!("Did not find node in second: {}", in_first);
-    };
-
-    let mut edits = Vec::new();
-
-    for u in first.nodes() {
-        let u_in_second = find_in_second(u);
-
-        for v in (u + 1)..first.size() {
-            if !first.is_present(v) {
-                continue;
-            }
-
-            let v_in_second = find_in_second(v);
-
-            let first_has_edge = first.has_edge(u, v);
-            let second_has_edge =
-                u_in_second == v_in_second || second.has_edge(u_in_second, v_in_second);
-            match (first_has_edge, second_has_edge) {
-                (true, false) => edits.push(Edit::Delete(first_imap[u][0], first_imap[v][0])),
-                (false, true) => edits.push(Edit::Insert(first_imap[u][0], first_imap[v][0])),
-                _ => {}
-            }
-        }
-    }
-
-    edits
 }
