@@ -366,7 +366,7 @@ pub fn rules123(p: &mut ProblemInstance) -> bool {
             debug_assert!(r.r1[u * p.g.size() + v] >= Weight::ZERO);
             debug_assert!(p.g.get(u, v) < Weight::ZERO);
 
-            p.g.set(u, v, InfiniteNum::NEG_INFINITY);
+            p.set(u, v, InfiniteNum::NEG_INFINITY);
             any_applied = true;
             applied = true;
 
@@ -1053,17 +1053,12 @@ fn min_cut(g: &Graph<Weight>, c: &FxHashSet<usize>, a: usize) -> Weight {
 }
 
 fn induced_cost_reduction(p: &mut ProblemInstance) {
-    let mut u_neighbors = Vec::new();
-
     let mut u = 0;
     'outer: while u < p.g.size() {
         if !p.g.is_present(u) {
             u += 1;
             continue;
         }
-
-        u_neighbors.clear();
-        u_neighbors.extend(p.g.neighbors_with_weights(u));
 
         for v in (u + 1)..p.g.size() {
             continue_if_not_present!(p.g, v);
@@ -1075,38 +1070,7 @@ fn induced_cost_reduction(p: &mut ProblemInstance) {
                 continue;
             }
 
-            let mut icf = Weight::ZERO;
-            let mut icp = Weight::ZERO;
-
-            for &(w, uw) in u_neighbors.iter() {
-                // TODO: This isn't in the paper, but I think it's correct?
-                // Specifically, the symmetric difference of N(u) and N(v) technically includes
-                // both u and v, but including them here doesn't seem to make much sense.
-                if w == v {
-                    continue;
-                }
-
-                let vw = p.g.get(v, w);
-                if vw > Weight::ZERO {
-                    // w in intersection of neighborhoods.
-                    icf += uw.min(vw);
-                } else {
-                    // w in symmetric difference of neighborhoods.
-                    icp += uw.abs().min(vw.abs());
-                }
-            }
-            for (w, vw) in p.g.neighbors_with_weights(v) {
-                // TODO: This isn't in the paper, but I think it's correct? See above.
-                if w == u {
-                    continue;
-                }
-
-                let uw = p.g.get(u, w);
-                if uw <= Weight::ZERO {
-                    // w in second part of symmetric difference of neighborhoods.
-                    icp += vw.abs().min(uw.abs());
-                }
-            }
+            let induced_costs = p.induced_costs.get_costs(u, v);
 
             // TODO: Could try skipping the bound calculation if icp/icf with the weight of uv
             // itself is *already* larger k.
@@ -1114,14 +1078,14 @@ fn induced_cost_reduction(p: &mut ProblemInstance) {
                 .conflicts
                 .min_cost_to_resolve_edge_disjoint_conflicts_ignoring(&p.g, u, v);
 
-            if icp + (-uv).max(Weight::ZERO) + bound > p.k {
+            if induced_costs.icp + (-uv).max(Weight::ZERO) + bound > p.k {
                 trace_and_path_log!(
                     p,
                     p.k,
                     "icp, forbid {:?}-{:?}, with icp {}, uv {} and k {}",
                     p.imap[u],
                     p.imap[v],
-                    icp,
+                    induced_costs.icp,
                     uv,
                     p.k
                 );
@@ -1138,7 +1102,7 @@ fn induced_cost_reduction(p: &mut ProblemInstance) {
                     p.params.stats.borrow_mut().k_red_from_zeroes += 0.5;
                 }
 
-                p.g.set(u, v, Weight::NEG_INFINITY);
+                p.set(u, v, Weight::NEG_INFINITY);
 
                 if p.k <= 0.0 {
                     return;
@@ -1153,14 +1117,14 @@ fn induced_cost_reduction(p: &mut ProblemInstance) {
                 // ends up being better.
                 continue 'outer;
             }
-            if icf + uv.max(Weight::ZERO) + bound > p.k {
+            if induced_costs.icf + uv.max(Weight::ZERO) + bound > p.k {
                 trace_and_path_log!(
                     p,
                     p.k,
                     "icf, merge {:?}-{:?}, with icf {}, uv {} and k {}",
                     p.imap[u],
                     p.imap[v],
-                    icf,
+                    induced_costs.icf,
                     uv,
                     p.k
                 );

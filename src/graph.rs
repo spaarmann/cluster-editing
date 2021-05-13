@@ -135,7 +135,8 @@ impl<T: GraphWeight> Graph<T> {
 
     /// Set the weight associated with pair `(u, v)`.
     /// u and v can be in any order, panics if `u == v`.
-    pub fn set(&mut self, u: usize, v: usize, w: T) {
+    /// Returns the previous value.
+    pub fn set(&mut self, u: usize, v: usize, w: T) -> T {
         debug_assert!(self.present[u]);
         debug_assert!(self.present[v]);
         assert_ne!(u, v);
@@ -146,6 +147,8 @@ impl<T: GraphWeight> Graph<T> {
         self.matrix[v * self.size + u] = w;
 
         self.oplog.push(Op::Set { u, v, prev });
+
+        prev
     }
 
     /// Returns an iterator over the open neighborhood of `u` (i.e., not including `u` itself).

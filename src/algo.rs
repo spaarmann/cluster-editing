@@ -1,6 +1,7 @@
 use crate::{
     conflicts::ConflictStore,
     graph::{GraphWeight, IndexMap},
+    induced_costs::InducedCosts,
     reduction,
     util::{FloatKey, InfiniteNum},
     Graph, PetGraph, Weight,
@@ -368,6 +369,7 @@ pub struct ProblemInstance<'a> {
     pub params: &'a Parameters,
     pub g: Graph<Weight>,
     pub conflicts: ConflictStore,
+    pub induced_costs: InducedCosts,
     pub imap: IndexMap,
     pub k: f32,
     pub k_max: f32,
@@ -382,11 +384,13 @@ pub struct ProblemInstance<'a> {
 impl<'a> ProblemInstance<'a> {
     pub fn new(params: &'a Parameters, g: Graph<Weight>, imap: IndexMap) -> Self {
         let conflicts = ConflictStore::new_for_graph(&g);
+        let induced_costs = InducedCosts::new_for_graph(&g);
         Self {
             params,
             g,
             imap,
             conflicts,
+            induced_costs,
             k: 0.0,
             k_max: 0.0,
             full_reduction_counter: 0,
@@ -399,6 +403,11 @@ impl<'a> ProblemInstance<'a> {
 
     fn fork_new_branch(&self) -> Self {
         self.clone()
+    }
+
+    pub fn set(&mut self, u: usize, v: usize, weight: Weight) {
+        let prev = self.g.set(u, v, weight);
+        self.induced_costs.update(&self.g, u, v, prev, weight);
     }
 
     /// Tries to find a solution of size <= k for this problem instance.
@@ -612,32 +621,7 @@ impl<'a> ProblemInstance<'a> {
 
         dbg_trace_indent!(self, _k_start, "Searching triple");
 
-        // Search for a conflict triple
-        // TODO: Surely this can be done a little smarter?
-        /*let mut triple = None;
-        'outer: for u in self.g.nodes() {
-            for v in self.g.nodes() {
-                if u == v {
-                    continue;
-                }
-
-                if !self.g.has_edge(u, v) {
-                    continue;
-                }
-
-                for w in self.g.nodes() {
-                    if v == w || u == w {
-                        continue;
-                    }
-
-                    if self.g.has_edge(u, w) && !self.g.has_edge(v, w) {
-                        // `vuw` is a conflict triple!
-                        triple = Some((v, u, w));
-                        break 'outer;
-                    }
-                }
-            }
-        }*/
+        // Get the next conflict triple
         let triple = self.conflicts.get_next_conflict();
 
         let (v, u, _w) = match triple {
@@ -696,6 +680,7 @@ impl<'a> ProblemInstance<'a> {
         let path_len = self.path_log.len();
         let prev_imap = self.imap.clone();
         let conflicts_oplog_len = self.conflicts.oplog_len();
+        let prev_induced_costs = self.induced_costs.clone(); // TODO: Oplog
         let prev_k = self.k;
         let prev_full_counter = self.full_reduction_counter;
         let prev_fast_counter = self.fast_reduction_counter;
@@ -726,7 +711,7 @@ impl<'a> ProblemInstance<'a> {
                         self.k
                     );
 
-                    self.g.set(u, v, InfiniteNum::NEG_INFINITY);
+                    self.set(u, v, InfiniteNum::NEG_INFINITY);
                     self.make_delete_edit(u, v);
 
                     self.find_cluster_editing()
@@ -754,6 +739,7 @@ impl<'a> ProblemInstance<'a> {
         this.path_log.truncate(path_len);
         this.imap = prev_imap;
         this.conflicts.rollback_to(conflicts_oplog_len);
+        this.induced_costs = prev_induced_costs;
         this.k = prev_k;
         this.full_reduction_counter = prev_full_counter;
         this.fast_reduction_counter = prev_fast_counter;
@@ -805,6 +791,7 @@ impl<'a> ProblemInstance<'a> {
         Edit::insert(&mut self.edits, &self.imap, u, v);
         self.conflicts.update_for_insert(&self.g, u, v);
     }
+
     pub fn make_delete_edit(&mut self, u: usize, v: usize) {
         Edit::delete(&mut self.edits, &self.imap, u, v);
         self.conflicts.update_for_delete(&self.g, u, v);
@@ -842,10 +829,10 @@ impl<'a> ProblemInstance<'a> {
                 if vw < Weight::ZERO {
                     // (+, -)
                     let new_weight = self.merge_nonmatching_nonzero(u, v, w);
-                    self.g.set(u, w, new_weight);
+                    self.set(u, w, new_weight);
                 } else if vw > Weight::ZERO {
                     // (+, +)
-                    self.g.set(u, w, uw + vw);
+                    self.set(u, w, uw + vw);
                 } else {
                     // (+, 0)
                     self.k -= 0.5;
@@ -854,11 +841,11 @@ impl<'a> ProblemInstance<'a> {
             } else if uw < Weight::ZERO {
                 if vw < Weight::ZERO {
                     // (-, -)
-                    self.g.set(u, w, uw + vw);
+                    self.set(u, w, uw + vw);
                 } else if vw > Weight::ZERO {
                     // (-, +)
                     let new_weight = self.merge_nonmatching_nonzero(v, u, w);
-                    self.g.set(u, w, new_weight);
+                    self.set(u, w, new_weight);
                 } else {
                     // (-, 0)
                     self.k -= 0.5;
@@ -867,11 +854,11 @@ impl<'a> ProblemInstance<'a> {
                 if vw < Weight::ZERO {
                     // (0, -)
                     self.k -= 0.5;
-                    self.g.set(u, w, vw);
+                    self.set(u, w, vw);
                 } else if vw > Weight::ZERO {
                     // (0, +)
                     self.k -= 0.5;
-                    self.g.set(u, w, vw);
+                    self.set(u, w, vw);
                     self.make_insert_edit(u, w);
                 } else {
                     // (0, 0)
@@ -895,6 +882,7 @@ impl<'a> ProblemInstance<'a> {
         let mut imap_v = self.imap.take(v);
         self.imap[u].append(&mut imap_v);
         self.conflicts.update_for_not_present(&self.g, v);
+        self.induced_costs.update_for_not_present(&self.g, v);
     }
 
     // `merge` helper. Merge uw and vw, under the assumption that weight(uw) > 0 and weight(vw) < 0.

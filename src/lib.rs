@@ -15,6 +15,7 @@ pub mod critical_cliques;
 pub mod graph;
 pub mod graph_writer;
 pub mod graphviz;
+pub mod induced_costs;
 pub mod parser;
 pub mod reduction;
 
