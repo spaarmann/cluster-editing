@@ -310,6 +310,7 @@ pub fn find_optimal_cluster_editing(
     // a completely new one. This isn't a great state of affair, it incurs a good amount
     // of unnecessary overhead, but it only happens once per component, so, eh.
     instance.conflicts = ConflictStore::new_for_graph(&instance.g);
+    instance.induced_costs = InducedCosts::new_for_graph(&instance.g);
 
     info!(
         "Reduced graph from {} nodes to {} nodes using parameter-independent reduction.",
@@ -619,12 +620,18 @@ impl<'a> ProblemInstance<'a> {
             return (false, self);
         }
 
-        dbg_trace_indent!(self, _k_start, "Searching triple");
+        dbg_trace_indent!(self, _k_start, "Searching edge to branch on.");
 
-        // Get the next conflict triple
-        let triple = self.conflicts.get_next_conflict();
+        // If there are still conflicts left, get the edge with minimum branching number to branch
+        // on.
+        let branch_edge = if self.conflicts.conflict_count() > 0 {
+            self.induced_costs
+                .get_edge_with_min_branching_number(&self.g, &self.imap)
+        } else {
+            None
+        };
 
-        let (v, u, _w) = match triple {
+        let (u, v) = match branch_edge {
             None => {
                 // No more conflict triples.
                 // If there are still zero-edges, we need to "cash in" the 0.5 edit cost we deferred
@@ -669,10 +676,11 @@ impl<'a> ProblemInstance<'a> {
         dbg_trace_indent!(
             self,
             _k_start,
-            "Found triple ({:?}-{:?}-{:?}), branching",
-            self.imap[v],
+            "Found edge ({},{}) = ({:?}-{:?}), branching",
+            u,
+            v,
             self.imap[u],
-            self.imap[_w]
+            self.imap[v],
         );
 
         let edit_len = self.edits.len();

@@ -1,4 +1,5 @@
 #![feature(btree_retain)]
+#![feature(binary_heap_retain)]
 // Writing graph theory code tends to do this :)
 #![allow(clippy::many_single_char_names)]
 // `if let None = ` is good actually if there's a very symmetric `if let Some` two lines down

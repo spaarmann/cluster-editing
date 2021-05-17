@@ -1,7 +1,10 @@
 use crate::{
-    graph::{Graph, GraphWeight},
+    graph::{Graph, GraphWeight, IndexMap},
     Weight,
 };
+
+use std::cmp::{Ordering, Reverse};
+use std::collections::BinaryHeap;
 
 #[derive(Copy, Clone, Debug)]
 pub struct Costs {
@@ -9,10 +12,40 @@ pub struct Costs {
     pub icp: Weight,
 }
 
+#[derive(Copy, Clone, Debug, PartialEq)]
+struct EdgeWithBranchingNumber {
+    u: usize,
+    v: usize,
+    branching_num: Weight,
+}
+
+// For this and Ord: We know we never get NaNs, and don't care much about any other floating point
+// weirdness, so this should be fine.
+impl Eq for EdgeWithBranchingNumber {}
+
+impl PartialOrd for EdgeWithBranchingNumber {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(
+            Reverse(self.branching_num)
+                .partial_cmp(&Reverse(other.branching_num))
+                .unwrap()
+                .then_with(|| Reverse(self.u).cmp(&Reverse(other.u)))
+                .then_with(|| Reverse(self.v).cmp(&Reverse(other.v))),
+        )
+    }
+}
+
+impl Ord for EdgeWithBranchingNumber {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.partial_cmp(other).unwrap()
+    }
+}
+
 #[derive(Clone)]
 pub struct InducedCosts {
     cost_store: Vec<Costs>,
     graph_size: usize,
+    branching_nums: BinaryHeap<EdgeWithBranchingNumber>,
     // TODO: Do Oplog instead of cloning once update_for_not_present exists properly.
     //oplog: Vec<Op>,
 }
@@ -41,6 +74,7 @@ impl InducedCosts {
         let mut this = Self {
             graph_size: size,
             cost_store,
+            branching_nums: BinaryHeap::new(),
             //       oplog: Vec::new(),
         };
 
@@ -51,6 +85,8 @@ impl InducedCosts {
 
     fn calculate_all_costs(&mut self, g: &Graph<Weight>) {
         let mut u_neighbors = Vec::new();
+
+        self.branching_nums.clear();
 
         let mut u = 0;
         while u < g.size() {
@@ -105,10 +141,19 @@ impl InducedCosts {
                     icp += (-uv).max(Weight::ZERO);
                 }
 
+                let costs = Costs { icf, icp };
+
                 let idx = self.idx(u, v);
-                self.cost_store[idx] = Costs { icf, icp };
+                self.cost_store[idx] = costs;
                 let idx = self.idx(v, u);
-                self.cost_store[idx] = Costs { icf, icp };
+                self.cost_store[idx] = costs;
+
+                let edge_with_branching_num = EdgeWithBranchingNumber {
+                    u,
+                    v,
+                    branching_num: Self::get_branching_number(costs, uv, false),
+                };
+                self.branching_nums.push(edge_with_branching_num);
             }
 
             u += 1;
@@ -116,12 +161,45 @@ impl InducedCosts {
     }
 
     pub fn update(&mut self, g: &Graph<Weight>, x: usize, y: usize, prev: Weight, new: Weight) {
+        /*if (x, y) == (7, 11) || (x, y) == (11, 7) {
+            let idx = self.idx(x, y);
+            log::debug!(
+                "Setting {}-{} to {} from {}, previous costs {:?}, prev branch number {}",
+                x,
+                y,
+                prev,
+                new,
+                self.cost_store[idx],
+                self.branching_nums
+                    .iter()
+                    .find(|&b| (b.u, b.v) == (x, y) || (b.v, b.u) == (x, y))
+                    .unwrap()
+                    .branching_num
+            );
+        }*/
+
         self.add_diff_to_costs(
             x,
             y,
             new.max(Weight::ZERO) - prev.max(Weight::ZERO),
             (-new).max(Weight::ZERO) - (-prev).max(Weight::ZERO),
+            new,
         );
+
+        /*if (x, y) == (7, 11) || (x, y) == (11, 7) {
+            let idx = self.idx(x, y);
+            log::debug!(
+                "{}-{} new costs {:?}, new branching number {}",
+                x,
+                y,
+                self.cost_store[idx],
+                self.branching_nums
+                    .iter()
+                    .find(|&b| (b.u, b.v) == (x, y) || (b.v, b.u) == (x, y))
+                    .unwrap()
+                    .branching_num
+            );
+        }*/
 
         for u in g.nodes() {
             if u == x || u == y {
@@ -170,6 +248,7 @@ impl InducedCosts {
                     u,
                     icf_contrib_new - icf_contrib_prev,
                     icp_contrib_new - icp_contrib_prev,
+                    ux,
                 );
             } else {
                 // Alternatively, if uy is not an edge, if xy is or was, xy appears in icp(xu).
@@ -185,7 +264,7 @@ impl InducedCosts {
                     Weight::ZERO
                 };
 
-                self.add_diff_to_costs(x, u, Weight::ZERO, icp_contrib_new - icp_contrib_prev);
+                self.add_diff_to_costs(x, u, Weight::ZERO, icp_contrib_new - icp_contrib_prev, ux);
             }
 
             // And then icf(yu) and icp(yu):
@@ -223,6 +302,7 @@ impl InducedCosts {
                     u,
                     icf_contrib_new - icf_contrib_prev,
                     icp_contrib_new - icp_contrib_prev,
+                    uy,
                 );
             } else {
                 // Alternatively, if ux is not an edge, if xy is or was, xy appears in icp(yu).
@@ -238,7 +318,7 @@ impl InducedCosts {
                     Weight::ZERO
                 };
 
-                self.add_diff_to_costs(y, u, Weight::ZERO, icp_contrib_new - icp_contrib_prev);
+                self.add_diff_to_costs(y, u, Weight::ZERO, icp_contrib_new - icp_contrib_prev, uy);
             }
 
             // First update icf(xu)
@@ -269,7 +349,14 @@ impl InducedCosts {
         self.calculate_all_costs(g);
     }
 
-    fn add_diff_to_costs(&mut self, u: usize, v: usize, icf_diff: Weight, icp_diff: Weight) {
+    fn add_diff_to_costs(
+        &mut self,
+        u: usize,
+        v: usize,
+        icf_diff: Weight,
+        icp_diff: Weight,
+        uv: Weight,
+    ) {
         let idx = self.idx(u, v);
         let uv_costs = &mut self.cost_store[idx];
         uv_costs.icf += icf_diff;
@@ -279,11 +366,160 @@ impl InducedCosts {
         let uv_costs = &mut self.cost_store[idx];
         uv_costs.icf += icf_diff;
         uv_costs.icp += icp_diff;
+
+        // Remove old entry from binary heap
+        self.branching_nums
+            .retain(|&b| !(b.u == u && b.v == v) && !(b.u == v && b.v == u));
+
+        // Add new entry
+        self.branching_nums.push(EdgeWithBranchingNumber {
+            u: u.min(v),
+            v: u.max(v),
+            branching_num: Self::get_branching_number(
+                *uv_costs,
+                uv,
+                (u, v) == (7, 11) || (u, v) == (11, 7),
+            ),
+        });
     }
 
     pub fn get_costs(&self, u: usize, v: usize) -> Costs {
         let idx = self.idx(u, v);
         self.cost_store[idx]
+    }
+
+    pub fn get_edge_with_min_branching_number(
+        &mut self, // TODO: This sohuldn't need to be mutable when done debugging
+        g: &Graph<Weight>,
+        imap: &IndexMap,
+    ) -> Option<(usize, usize)> {
+        // TODO: Using the heap here currently results in exact003 going way past k=42 for some
+        // reason. First diff in execution is choosing a different edge to branch on at some
+        // points, but the two have the same branching number...
+        // In theory that shouldn't matter? But it makes comparing to figure out where else
+        // something goes wrong harder.
+        // We could probably force the same order by sorting the elements of the heap by vertex
+        // index if the numbers are equal, since the loop below will pick the *first* it finds and
+        // iterates in order.
+
+        let res = self
+            .branching_nums
+            .peek()
+            .map(|&b| if b.u < b.v { (b.u, b.v) } else { (b.v, b.u) });
+        //return res;
+
+        //if let Some((1, 8)) = res {
+        /*if let Some((u, v)) = res {
+            log::debug!(
+                "Chose ({}, {}) = ({:?}, {:?}) as min branching number, heap is currently: {:?}",
+                u,
+                v,
+                "foo", //imap[u],
+                "foo", //imap[v],
+                self.branching_nums
+            );
+
+            /*let top = self.branching_nums.pop().unwrap();
+            let second = *self.branching_nums.peek().unwrap();
+
+            // Restore value on the heap
+            self.branching_nums.push(top);
+
+            log::debug!(
+                "Top is {:?}, second is {:?}, brnum partial_cmp {:?}, whole partial_cmp {:?}",
+                top,
+                second,
+                top.branching_num.partial_cmp(&second.branching_num),
+                top.partial_cmp(&second)
+            );
+
+            let idx = self.idx(u, v);
+            log::debug!(
+                "{}-{} edge is {}, costs are {:?}",
+                u,
+                v,
+                g.get(u, v),
+                self.cost_store[idx]
+            );*/
+        }*/
+
+        return res;
+
+        /*let mut best = None;
+        let mut best_val = Weight::INFINITY;
+        for u in g.nodes() {
+            for v in (u + 1)..g.size() {
+                continue_if_not_present!(g, v);
+
+                let idx = self.idx(u, v);
+                let costs = self.cost_store[idx];
+                let branching_num = Self::get_branching_number(costs, g.get(u, v), false);
+
+                /*if (u, v) == (7, 11) || (u, v) == (3, 4) {
+                    log::debug!(
+                        "Branching number for {}-{} is {} with costs {:?} and uv {}",
+                        u,
+                        v,
+                        branching_num,
+                        costs,
+                        g.get(u, v)
+                    );
+                }*/
+
+                if branching_num < best_val {
+                    best = Some((u, v));
+                    best_val = branching_num;
+                }
+            }
+        }
+
+        best*/
+    }
+
+    fn get_branching_number(costs: Costs, uv: Weight, log: bool) -> Weight {
+        let delete_costs = uv.max(Weight::ZERO);
+
+        if delete_costs < 0.0001 || costs.icp.abs() < 0.0001 {
+            /*if log {
+                log::debug!(
+                    "BranchNum INFINITY from del_cost {}, {:?}, uv {}",
+                    delete_costs,
+                    costs,
+                    uv
+                );
+            }*/
+            Weight::INFINITY
+        } else {
+            // We calculated branching numbers for [0, 50] x [0, 50] in MATLAB and fitted a poly44
+            // surface to the results for faster approximation:
+            let x = delete_costs;
+            let y = costs.icp;
+
+            /*if log {
+                log::debug!(
+                    "Non-INFINITY branchnum from del_cost {}, {:?}, uv {}",
+                    delete_costs,
+                    costs,
+                    uv
+                );
+            }*/
+
+            1.478
+                + -0.03714 * x
+                + -0.3714 * y
+                + 0.001421 * x * x
+                + 0.001493 * x * y
+                + 0.001421 * y * y
+                + -2.543e-05 * x * x * x
+                + -2.732e-05 * x * x * y
+                + -2.732e-05 * x * y * y
+                + -2.543e-05 * y * y * y
+                + 1.712e-07 * x * x * x * x
+                + 1.858e-07 * x * x * x * y
+                + 1.903e-07 * x * x * y * y
+                + 1.858e-07 * x * y * y * y
+                + 1.712e-07 * y * y * y * y
+        }
     }
 
     /*pub fn oplog_len(&self) -> usize {
