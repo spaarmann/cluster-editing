@@ -1,4 +1,4 @@
-#![feature(btree_retain)]
+#![feature(map_first_last)]
 #![feature(binary_heap_retain)]
 // Writing graph theory code tends to do this :)
 #![allow(clippy::many_single_char_names)]

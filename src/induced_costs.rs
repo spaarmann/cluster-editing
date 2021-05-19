@@ -3,8 +3,8 @@ use crate::{
     Weight,
 };
 
-use std::cmp::{Ordering, Reverse};
-use std::collections::BinaryHeap;
+use std::cmp::Ordering;
+use std::collections::BTreeSet;
 
 #[derive(Copy, Clone, Debug)]
 pub struct Costs {
@@ -26,11 +26,11 @@ impl Eq for EdgeWithBranchingNumber {}
 impl PartialOrd for EdgeWithBranchingNumber {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(
-            Reverse(self.branching_num)
-                .partial_cmp(&Reverse(other.branching_num))
+            self.branching_num
+                .partial_cmp(&other.branching_num)
                 .unwrap()
-                .then_with(|| Reverse(self.u).cmp(&Reverse(other.u)))
-                .then_with(|| Reverse(self.v).cmp(&Reverse(other.v))),
+                .then_with(|| self.u.cmp(&other.u))
+                .then_with(|| self.v.cmp(&other.v)),
         )
     }
 }
@@ -45,7 +45,7 @@ impl Ord for EdgeWithBranchingNumber {
 pub struct InducedCosts {
     cost_store: Vec<Costs>,
     graph_size: usize,
-    branching_nums: BinaryHeap<EdgeWithBranchingNumber>,
+    branching_nums: BTreeSet<EdgeWithBranchingNumber>,
     // TODO: Do Oplog instead of cloning once update_for_not_present exists properly.
     //oplog: Vec<Op>,
 }
@@ -74,7 +74,7 @@ impl InducedCosts {
         let mut this = Self {
             graph_size: size,
             cost_store,
-            branching_nums: BinaryHeap::new(),
+            branching_nums: BTreeSet::new(),
             //       oplog: Vec::new(),
         };
 
@@ -153,7 +153,7 @@ impl InducedCosts {
                     v,
                     branching_num: Self::get_branching_number(costs, uv, false),
                 };
-                self.branching_nums.push(edge_with_branching_num);
+                self.branching_nums.insert(edge_with_branching_num);
             }
 
             u += 1;
@@ -184,6 +184,7 @@ impl InducedCosts {
             new.max(Weight::ZERO) - prev.max(Weight::ZERO),
             (-new).max(Weight::ZERO) - (-prev).max(Weight::ZERO),
             new,
+            prev,
         );
 
         /*if (x, y) == (7, 11) || (x, y) == (11, 7) {
@@ -249,6 +250,7 @@ impl InducedCosts {
                     icf_contrib_new - icf_contrib_prev,
                     icp_contrib_new - icp_contrib_prev,
                     ux,
+                    ux,
                 );
             } else {
                 // Alternatively, if uy is not an edge, if xy is or was, xy appears in icp(xu).
@@ -264,7 +266,14 @@ impl InducedCosts {
                     Weight::ZERO
                 };
 
-                self.add_diff_to_costs(x, u, Weight::ZERO, icp_contrib_new - icp_contrib_prev, ux);
+                self.add_diff_to_costs(
+                    x,
+                    u,
+                    Weight::ZERO,
+                    icp_contrib_new - icp_contrib_prev,
+                    ux,
+                    ux,
+                );
             }
 
             // And then icf(yu) and icp(yu):
@@ -303,6 +312,7 @@ impl InducedCosts {
                     icf_contrib_new - icf_contrib_prev,
                     icp_contrib_new - icp_contrib_prev,
                     uy,
+                    uy,
                 );
             } else {
                 // Alternatively, if ux is not an edge, if xy is or was, xy appears in icp(yu).
@@ -318,7 +328,14 @@ impl InducedCosts {
                     Weight::ZERO
                 };
 
-                self.add_diff_to_costs(y, u, Weight::ZERO, icp_contrib_new - icp_contrib_prev, uy);
+                self.add_diff_to_costs(
+                    y,
+                    u,
+                    Weight::ZERO,
+                    icp_contrib_new - icp_contrib_prev,
+                    uy,
+                    uy,
+                );
             }
 
             // First update icf(xu)
@@ -355,10 +372,14 @@ impl InducedCosts {
         v: usize,
         icf_diff: Weight,
         icp_diff: Weight,
-        uv: Weight,
+        uv_new: Weight,
+        uv_prev: Weight,
     ) {
         let idx = self.idx(u, v);
         let uv_costs = &mut self.cost_store[idx];
+
+        let old_costs = *uv_costs;
+
         uv_costs.icf += icf_diff;
         uv_costs.icp += icp_diff;
 
@@ -367,20 +388,25 @@ impl InducedCosts {
         uv_costs.icf += icf_diff;
         uv_costs.icp += icp_diff;
 
-        // Remove old entry from binary heap
-        self.branching_nums
-            .retain(|&b| !(b.u == u && b.v == v) && !(b.u == v && b.v == u));
-
-        // Add new entry
-        self.branching_nums.push(EdgeWithBranchingNumber {
+        let old_entry = EdgeWithBranchingNumber {
             u: u.min(v),
             v: u.max(v),
-            branching_num: Self::get_branching_number(
-                *uv_costs,
-                uv,
-                (u, v) == (7, 11) || (u, v) == (11, 7),
-            ),
-        });
+            branching_num: Self::get_branching_number(old_costs, uv_prev, false),
+        };
+
+        let was_present = self.branching_nums.remove(&old_entry);
+        assert!(
+            was_present,
+            "Did not find previous instance of branching number entry!"
+        );
+
+        let new_entry = EdgeWithBranchingNumber {
+            branching_num: Self::get_branching_number(*uv_costs, uv_new, false),
+            ..old_entry
+        };
+
+        // Add new entry
+        self.branching_nums.insert(new_entry);
     }
 
     pub fn get_costs(&self, u: usize, v: usize) -> Costs {
@@ -404,7 +430,7 @@ impl InducedCosts {
 
         let res = self
             .branching_nums
-            .peek()
+            .first()
             .map(|&b| if b.u < b.v { (b.u, b.v) } else { (b.v, b.u) });
         //return res;
 
