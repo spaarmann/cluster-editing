@@ -45,7 +45,8 @@ impl Ord for EdgeWithBranchingNumber {
 pub struct InducedCosts {
     cost_store: Vec<Costs>,
     graph_size: usize,
-    branching_nums: BTreeSet<EdgeWithBranchingNumber>,
+    min_branching_num: Option<EdgeWithBranchingNumber>,
+    //branching_nums: BTreeSet<EdgeWithBranchingNumber>,
     // TODO: Do Oplog instead of cloning once update_for_not_present exists properly.
     //oplog: Vec<Op>,
 }
@@ -74,7 +75,8 @@ impl InducedCosts {
         let mut this = Self {
             graph_size: size,
             cost_store,
-            branching_nums: BTreeSet::new(),
+            min_branching_num: None,
+            //branching_nums: BTreeSet::new(),
             //       oplog: Vec::new(),
         };
 
@@ -86,7 +88,8 @@ impl InducedCosts {
     fn calculate_all_costs(&mut self, g: &Graph<Weight>) {
         let mut u_neighbors = Vec::new();
 
-        self.branching_nums.clear();
+        //self.branching_nums.clear();
+        self.min_branching_num = None;
 
         let mut u = 0;
         while u < g.size() {
@@ -153,7 +156,19 @@ impl InducedCosts {
                     v,
                     branching_num: Self::get_branching_number(costs, uv, false),
                 };
-                self.branching_nums.insert(edge_with_branching_num);
+
+                if edge_with_branching_num.branching_num.is_infinite() {
+                    continue;
+                }
+
+                if self
+                    .min_branching_num
+                    .map(|b| edge_with_branching_num < b)
+                    .unwrap_or(true)
+                {
+                    self.min_branching_num = Some(edge_with_branching_num);
+                }
+                //self.branching_nums.insert(edge_with_branching_num);
             }
 
             u += 1;
@@ -388,7 +403,26 @@ impl InducedCosts {
         uv_costs.icf += icf_diff;
         uv_costs.icp += icp_diff;
 
-        let old_entry = EdgeWithBranchingNumber {
+        let new_branching_num = EdgeWithBranchingNumber {
+            u: u.min(v),
+            v: u.max(v),
+            branching_num: Self::get_branching_number(*uv_costs, uv_new, false),
+        };
+
+        if let Some(current_min) = self.min_branching_num {
+            if new_branching_num <= current_min {
+                self.min_branching_num = Some(current_min);
+            } else if (current_min.u, current_min.v) == (new_branching_num.u, new_branching_num.v) {
+                self.min_branching_num = None;
+            }
+        } else if new_branching_num.branching_num.is_finite() {
+            // This means we may sometimes not actually have the real minimum in there.
+            // Might still be worth a try like this, it shouldn't impact correctness.
+            // To avoid that, just remove this else block.
+            self.min_branching_num = Some(new_branching_num);
+        }
+
+        /*let old_entry = EdgeWithBranchingNumber {
             u: u.min(v),
             v: u.max(v),
             branching_num: Self::get_branching_number(old_costs, uv_prev, false),
@@ -410,7 +444,7 @@ impl InducedCosts {
         );
         assert!(new_entry.branching_num > 0.0);
 
-        self.branching_nums.insert(new_entry);
+        self.branching_nums.insert(new_entry);*/
     }
 
     pub fn get_costs(&self, u: usize, v: usize) -> Costs {
@@ -423,19 +457,48 @@ impl InducedCosts {
         g: &Graph<Weight>,
         imap: &IndexMap,
     ) -> Option<(usize, usize)> {
-        // TODO: Using the heap here currently results in exact003 going way past k=42 for some
-        // reason. First diff in execution is choosing a different edge to branch on at some
-        // points, but the two have the same branching number...
-        // In theory that shouldn't matter? But it makes comparing to figure out where else
-        // something goes wrong harder.
-        // We could probably force the same order by sorting the elements of the heap by vertex
-        // index if the numbers are equal, since the loop below will pick the *first* it finds and
-        // iterates in order.
+        if let Some(min_branching_num) = self.min_branching_num {
+            return Some((min_branching_num.u, min_branching_num.v));
+        }
 
-        let res = self
-            .branching_nums
-            .first()
-            .map(|&b| if b.u < b.v { (b.u, b.v) } else { (b.v, b.u) });
+        // If we don't currently have a stored min branching number, we'll have to search for it.
+        // TODO: If we ever remove the else branch in add_diff_to_costs, we may want to set the
+        // next-best value as future min here.
+        for u in g.nodes() {
+            for v in (u + 1)..g.size() {
+                continue_if_not_present!(g, v);
+
+                let uv = g.get(u, v);
+
+                let idx = self.idx(u, v);
+                let costs = self.cost_store[idx];
+
+                let edge_with_branching_num = EdgeWithBranchingNumber {
+                    u,
+                    v,
+                    branching_num: Self::get_branching_number(costs, uv, false),
+                };
+
+                if edge_with_branching_num.branching_num.is_infinite() {
+                    continue;
+                }
+
+                if self
+                    .min_branching_num
+                    .map(|b| edge_with_branching_num < b)
+                    .unwrap_or(true)
+                {
+                    self.min_branching_num = Some(edge_with_branching_num);
+                }
+            }
+        }
+
+        return self.min_branching_num.map(|b| (b.u, b.v));
+
+        /*let res = self
+        .branching_nums
+        .first()
+        .map(|&b| if b.u < b.v { (b.u, b.v) } else { (b.v, b.u) });*/
         //return res;
 
         //if let Some((1, 8)) = res {
@@ -473,7 +536,7 @@ impl InducedCosts {
             );*/
         }*/
 
-        return res;
+        //return res;
 
         /*let mut best = None;
         let mut best_val = Weight::INFINITY;
