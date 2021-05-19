@@ -1,10 +1,9 @@
 use crate::{
-    graph::{Graph, GraphWeight, IndexMap},
+    graph::{Graph, GraphWeight},
     Weight,
 };
 
 use std::cmp::Ordering;
-use std::collections::BTreeSet;
 
 #[derive(Copy, Clone, Debug)]
 pub struct Costs {
@@ -46,7 +45,6 @@ pub struct InducedCosts {
     cost_store: Vec<Costs>,
     graph_size: usize,
     min_branching_num: Option<EdgeWithBranchingNumber>,
-    //branching_nums: BTreeSet<EdgeWithBranchingNumber>,
     // TODO: Do Oplog instead of cloning once update_for_not_present exists properly.
     //oplog: Vec<Op>,
 }
@@ -76,7 +74,6 @@ impl InducedCosts {
             graph_size: size,
             cost_store,
             min_branching_num: None,
-            //branching_nums: BTreeSet::new(),
             //       oplog: Vec::new(),
         };
 
@@ -154,7 +151,7 @@ impl InducedCosts {
                 let edge_with_branching_num = EdgeWithBranchingNumber {
                     u,
                     v,
-                    branching_num: Self::get_branching_number(costs, uv, false),
+                    branching_num: Self::get_branching_number(costs, uv),
                 };
 
                 if edge_with_branching_num.branching_num.is_infinite() {
@@ -168,7 +165,6 @@ impl InducedCosts {
                 {
                     self.min_branching_num = Some(edge_with_branching_num);
                 }
-                //self.branching_nums.insert(edge_with_branching_num);
             }
 
             u += 1;
@@ -176,46 +172,13 @@ impl InducedCosts {
     }
 
     pub fn update(&mut self, g: &Graph<Weight>, x: usize, y: usize, prev: Weight, new: Weight) {
-        /*if (x, y) == (7, 11) || (x, y) == (11, 7) {
-            let idx = self.idx(x, y);
-            log::debug!(
-                "Setting {}-{} to {} from {}, previous costs {:?}, prev branch number {}",
-                x,
-                y,
-                prev,
-                new,
-                self.cost_store[idx],
-                self.branching_nums
-                    .iter()
-                    .find(|&b| (b.u, b.v) == (x, y) || (b.v, b.u) == (x, y))
-                    .unwrap()
-                    .branching_num
-            );
-        }*/
-
         self.add_diff_to_costs(
             x,
             y,
             new.max(Weight::ZERO) - prev.max(Weight::ZERO),
             (-new).max(Weight::ZERO) - (-prev).max(Weight::ZERO),
             new,
-            prev,
         );
-
-        /*if (x, y) == (7, 11) || (x, y) == (11, 7) {
-            let idx = self.idx(x, y);
-            log::debug!(
-                "{}-{} new costs {:?}, new branching number {}",
-                x,
-                y,
-                self.cost_store[idx],
-                self.branching_nums
-                    .iter()
-                    .find(|&b| (b.u, b.v) == (x, y) || (b.v, b.u) == (x, y))
-                    .unwrap()
-                    .branching_num
-            );
-        }*/
 
         for u in g.nodes() {
             if u == x || u == y {
@@ -224,10 +187,6 @@ impl InducedCosts {
 
             let uy = g.get(u, y);
             let ux = g.get(u, x);
-
-            // icf(xu) = sum_{v in N(x)+N(u)} xv.min(uv)
-            // We changed xy, there is potentially a term with v=y in that sum, which we would need
-            // to update.
 
             // Start with icf(xu) and icp(xu):
 
@@ -265,7 +224,6 @@ impl InducedCosts {
                     icf_contrib_new - icf_contrib_prev,
                     icp_contrib_new - icp_contrib_prev,
                     ux,
-                    ux,
                 );
             } else {
                 // Alternatively, if uy is not an edge, if xy is or was, xy appears in icp(xu).
@@ -281,14 +239,7 @@ impl InducedCosts {
                     Weight::ZERO
                 };
 
-                self.add_diff_to_costs(
-                    x,
-                    u,
-                    Weight::ZERO,
-                    icp_contrib_new - icp_contrib_prev,
-                    ux,
-                    ux,
-                );
+                self.add_diff_to_costs(x, u, Weight::ZERO, icp_contrib_new - icp_contrib_prev, ux);
             }
 
             // And then icf(yu) and icp(yu):
@@ -327,7 +278,6 @@ impl InducedCosts {
                     icf_contrib_new - icf_contrib_prev,
                     icp_contrib_new - icp_contrib_prev,
                     uy,
-                    uy,
                 );
             } else {
                 // Alternatively, if ux is not an edge, if xy is or was, xy appears in icp(yu).
@@ -343,36 +293,8 @@ impl InducedCosts {
                     Weight::ZERO
                 };
 
-                self.add_diff_to_costs(
-                    y,
-                    u,
-                    Weight::ZERO,
-                    icp_contrib_new - icp_contrib_prev,
-                    uy,
-                    uy,
-                );
+                self.add_diff_to_costs(y, u, Weight::ZERO, icp_contrib_new - icp_contrib_prev, uy);
             }
-
-            // First update icf(xu)
-            /*if uy > Weight::ZERO {
-                // y was and is a neighbor u
-
-                if new > Weight::ZERO && prev > Weight::ZERO {
-                    // y also was and is a neighbor of x, it thus appears in the icf(xu) calculation
-                    // both before and after
-                    self.add_diff_to_costs(x, u, new.min(uy) - prev.min(uy), Weight::ZERO);
-                } else if new > Weight::ZERO && prev <= Weight::ZERO {
-                    // y wasn't a neighbor of x, but it is now, so it now appears in icf(xu)
-                    self.add_diff_to_costs(x, u, new.min(uy), Weight::ZERO);
-                } else if new <= Weight::ZERO && prev > Weight::ZERO {
-                    // y was a neighbor of x, but isn't now, so it used to appear in icf(xu) but
-                    // now doesn't
-                    self.add_diff_to_costs(x, u, -prev.min(uy), Weight::ZERO);
-                } else {
-                    // y isn't and wasn't a neighbor of x, so it didn't and doesn't appear in
-                    // icf(xu)
-                }
-            }*/
         }
     }
 
@@ -388,12 +310,9 @@ impl InducedCosts {
         icf_diff: Weight,
         icp_diff: Weight,
         uv_new: Weight,
-        uv_prev: Weight,
     ) {
         let idx = self.idx(u, v);
         let uv_costs = &mut self.cost_store[idx];
-
-        let old_costs = *uv_costs;
 
         uv_costs.icf += icf_diff;
         uv_costs.icp += icp_diff;
@@ -406,7 +325,7 @@ impl InducedCosts {
         let new_branching_num = EdgeWithBranchingNumber {
             u: u.min(v),
             v: u.max(v),
-            branching_num: Self::get_branching_number(*uv_costs, uv_new, false),
+            branching_num: Self::get_branching_number(*uv_costs, uv_new),
         };
 
         if let Some(current_min) = self.min_branching_num {
@@ -421,30 +340,6 @@ impl InducedCosts {
             // To avoid that, just remove this else block.
             self.min_branching_num = Some(new_branching_num);
         }
-
-        /*let old_entry = EdgeWithBranchingNumber {
-            u: u.min(v),
-            v: u.max(v),
-            branching_num: Self::get_branching_number(old_costs, uv_prev, false),
-        };
-
-        let new_entry = EdgeWithBranchingNumber {
-            branching_num: Self::get_branching_number(*uv_costs, uv_new, false),
-            ..old_entry
-        };
-
-        if (new_entry.branching_num - old_entry.branching_num).abs() < 0.001 {
-            return;
-        }
-
-        let was_present = self.branching_nums.remove(&old_entry);
-        assert!(
-            was_present,
-            "Did not find previous instance of branching number entry!"
-        );
-        assert!(new_entry.branching_num > 0.0);
-
-        self.branching_nums.insert(new_entry);*/
     }
 
     pub fn get_costs(&self, u: usize, v: usize) -> Costs {
@@ -455,14 +350,13 @@ impl InducedCosts {
     pub fn get_edge_with_min_branching_number(
         &mut self, // TODO: This sohuldn't need to be mutable when done debugging
         g: &Graph<Weight>,
-        imap: &IndexMap,
     ) -> Option<(usize, usize)> {
         if let Some(min_branching_num) = self.min_branching_num {
             return Some((min_branching_num.u, min_branching_num.v));
         }
 
         // If we don't currently have a stored min branching number, we'll have to search for it.
-        // TODO: If we ever remove the else branch in add_diff_to_costs, we may want to set the
+        // If we ever remove the else branch in add_diff_to_costs, we may want to set the
         // next-best value as future min here.
         for u in g.nodes() {
             for v in (u + 1)..g.size() {
@@ -476,7 +370,7 @@ impl InducedCosts {
                 let edge_with_branching_num = EdgeWithBranchingNumber {
                     u,
                     v,
-                    branching_num: Self::get_branching_number(costs, uv, false),
+                    branching_num: Self::get_branching_number(costs, uv),
                 };
 
                 if edge_with_branching_num.branching_num.is_infinite() {
@@ -494,108 +388,18 @@ impl InducedCosts {
         }
 
         return self.min_branching_num.map(|b| (b.u, b.v));
-
-        /*let res = self
-        .branching_nums
-        .first()
-        .map(|&b| if b.u < b.v { (b.u, b.v) } else { (b.v, b.u) });*/
-        //return res;
-
-        //if let Some((1, 8)) = res {
-        /*if let Some((u, v)) = res {
-            log::debug!(
-                "Chose ({}, {}) = ({:?}, {:?}) as min branching number, heap is currently: {:?}",
-                u,
-                v,
-                "foo", //imap[u],
-                "foo", //imap[v],
-                self.branching_nums
-            );
-
-            /*let top = self.branching_nums.pop().unwrap();
-            let second = *self.branching_nums.peek().unwrap();
-
-            // Restore value on the heap
-            self.branching_nums.push(top);
-
-            log::debug!(
-                "Top is {:?}, second is {:?}, brnum partial_cmp {:?}, whole partial_cmp {:?}",
-                top,
-                second,
-                top.branching_num.partial_cmp(&second.branching_num),
-                top.partial_cmp(&second)
-            );
-
-            let idx = self.idx(u, v);
-            log::debug!(
-                "{}-{} edge is {}, costs are {:?}",
-                u,
-                v,
-                g.get(u, v),
-                self.cost_store[idx]
-            );*/
-        }*/
-
-        //return res;
-
-        /*let mut best = None;
-        let mut best_val = Weight::INFINITY;
-        for u in g.nodes() {
-            for v in (u + 1)..g.size() {
-                continue_if_not_present!(g, v);
-
-                let idx = self.idx(u, v);
-                let costs = self.cost_store[idx];
-                let branching_num = Self::get_branching_number(costs, g.get(u, v), false);
-
-                /*if (u, v) == (7, 11) || (u, v) == (3, 4) {
-                    log::debug!(
-                        "Branching number for {}-{} is {} with costs {:?} and uv {}",
-                        u,
-                        v,
-                        branching_num,
-                        costs,
-                        g.get(u, v)
-                    );
-                }*/
-
-                if branching_num < best_val {
-                    best = Some((u, v));
-                    best_val = branching_num;
-                }
-            }
-        }
-
-        best*/
     }
 
-    fn get_branching_number(costs: Costs, uv: Weight, log: bool) -> Weight {
+    fn get_branching_number(costs: Costs, uv: Weight) -> Weight {
         let delete_costs = uv.max(Weight::ZERO);
 
         if delete_costs < 0.0001 || costs.icp.abs() < 0.0001 {
-            /*if log {
-                log::debug!(
-                    "BranchNum INFINITY from del_cost {}, {:?}, uv {}",
-                    delete_costs,
-                    costs,
-                    uv
-                );
-            }*/
             Weight::INFINITY
         } else {
             // We calculated branching numbers for [0, 50] x [0, 50] in MATLAB and fitted a poly44
             // surface to the results for faster approximation:
             let x = delete_costs;
             let y = costs.icp;
-
-            /*if log {
-                log::debug!(
-                    "Non-INFINITY branchnum from del_cost {}, {:?}, uv {}",
-                    delete_costs,
-                    costs,
-                    uv
-                );
-            }*/
 
             1.478
                 + -0.03714 * x

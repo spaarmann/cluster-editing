@@ -626,7 +626,7 @@ impl<'a> ProblemInstance<'a> {
         // on.
         let branch_edge = if self.conflicts.conflict_count() > 0 {
             self.induced_costs
-                .get_edge_with_min_branching_number(&self.g, &self.imap)
+                .get_edge_with_min_branching_number(&self.g)
         } else {
             None
         };
