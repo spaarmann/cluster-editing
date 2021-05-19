@@ -394,18 +394,22 @@ impl InducedCosts {
             branching_num: Self::get_branching_number(old_costs, uv_prev, false),
         };
 
-        let was_present = self.branching_nums.remove(&old_entry);
-        assert!(
-            was_present,
-            "Did not find previous instance of branching number entry!"
-        );
-
         let new_entry = EdgeWithBranchingNumber {
             branching_num: Self::get_branching_number(*uv_costs, uv_new, false),
             ..old_entry
         };
 
-        // Add new entry
+        if (new_entry.branching_num - old_entry.branching_num).abs() < 0.001 {
+            return;
+        }
+
+        let was_present = self.branching_nums.remove(&old_entry);
+        assert!(
+            was_present,
+            "Did not find previous instance of branching number entry!"
+        );
+        assert!(new_entry.branching_num > 0.0);
+
         self.branching_nums.insert(new_entry);
     }
 
@@ -532,7 +536,7 @@ impl InducedCosts {
 
             1.478
                 + -0.03714 * x
-                + -0.3714 * y
+                + -0.03714 * y
                 + 0.001421 * x * x
                 + 0.001493 * x * y
                 + 0.001421 * y * y
