@@ -886,11 +886,11 @@ impl<'a> ProblemInstance<'a> {
             &self.edits[_start_edit_len..]
         );
 
+        self.induced_costs.update_for_not_present(&self.g, v);
         self.g.set_not_present(v);
         let mut imap_v = self.imap.take(v);
         self.imap[u].append(&mut imap_v);
         self.conflicts.update_for_not_present(&self.g, v);
-        self.induced_costs.update_for_not_present(&self.g, v);
     }
 
     // `merge` helper. Merge uw and vw, under the assumption that weight(uw) > 0 and weight(vw) < 0.

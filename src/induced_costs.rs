@@ -298,9 +298,53 @@ impl InducedCosts {
         }
     }
 
-    pub fn update_for_not_present(&mut self, g: &Graph<Weight>, _x: usize) {
-        // TODO: Write an update for this
-        self.calculate_all_costs(g);
+    // Called while `x` is still present in the graph, so we can still know what relationships it
+    // had to other nodes previously.
+    pub fn update_for_not_present(&mut self, g: &Graph<Weight>, x: usize) {
+        // Removing x means that for all u != x, icf(xu) and icp(xu) disappear.
+        // Also, for a pair uv, if before xu and xv existed, x was in the common neighborhood of u
+        // and v and thus icf(uv) changes.
+        // For a pair uv, if before xu existed and xv didn't, or vice-versa, x was in the symmetric
+        // difference of the neighborhoods, and thus icp(uv) changes.
+
+        for u in g.nodes() {
+            if x == u {
+                continue;
+            }
+
+            // icf(xu) and icp(xu) are not a thing anymore. We don't need to store anything
+            // regarding that however, as we never iterate over all our stored values or something
+            // similar. All operations are always based on what is present in the graph passed in,
+            // so future ops will ignore these values automatically.
+            // The only exception is the min_branching_num; if that edge is current xu we have to
+            // discard it.
+            if let Some(min_branching_num) = self.min_branching_num {
+                if (min_branching_num.u, min_branching_num.v) == (x, u)
+                    || (min_branching_num.u, min_branching_num.v) == (u, x)
+                {
+                    self.min_branching_num = None;
+                }
+            }
+
+            let xu = g.get(x, u);
+
+            for v in (u + 1)..g.size() {
+                if !g.is_present(v) || v == x {
+                    continue;
+                }
+
+                let xv = g.get(x, v);
+                let uv = g.get(u, v);
+
+                if xu > Weight::ZERO && xv > Weight::ZERO {
+                    // x has a term in icf(uv) which we need to take out:
+                    self.add_diff_to_costs(u, v, -(xu.min(xv)), Weight::ZERO, uv);
+                } else if !(xu <= Weight::ZERO && xv <= Weight::ZERO) {
+                    // x has a term in icp(uv) which we need to take out:
+                    self.add_diff_to_costs(u, v, Weight::ZERO, -(xu.abs().min(xv.abs())), uv);
+                }
+            }
+        }
     }
 
     fn add_diff_to_costs(
@@ -313,7 +357,6 @@ impl InducedCosts {
     ) {
         let idx = self.idx(u, v);
         let uv_costs = &mut self.cost_store[idx];
-
         uv_costs.icf += icf_diff;
         uv_costs.icp += icp_diff;
 
