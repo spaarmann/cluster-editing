@@ -688,7 +688,7 @@ impl<'a> ProblemInstance<'a> {
         let path_len = self.path_log.len();
         let prev_imap = self.imap.clone();
         let conflicts_oplog_len = self.conflicts.oplog_len();
-        let prev_induced_costs = self.induced_costs.clone(); // TODO: Oplog
+        let induced_costs_oplog_len = self.induced_costs.oplog_len();
         let prev_k = self.k;
         let prev_full_counter = self.full_reduction_counter;
         let prev_fast_counter = self.fast_reduction_counter;
@@ -747,7 +747,7 @@ impl<'a> ProblemInstance<'a> {
         this.path_log.truncate(path_len);
         this.imap = prev_imap;
         this.conflicts.rollback_to(conflicts_oplog_len);
-        this.induced_costs = prev_induced_costs;
+        this.induced_costs.rollback_to(induced_costs_oplog_len);
         this.k = prev_k;
         this.full_reduction_counter = prev_full_counter;
         this.fast_reduction_counter = prev_fast_counter;

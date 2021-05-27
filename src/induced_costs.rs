@@ -45,19 +45,18 @@ pub struct InducedCosts {
     cost_store: Vec<Costs>,
     graph_size: usize,
     min_branching_num: Option<EdgeWithBranchingNumber>,
-    // TODO: Do Oplog instead of cloning once update_for_not_present exists properly.
-    //oplog: Vec<Op>,
+    oplog: Vec<Op>,
 }
 
-/*#[derive(Clone)]
-pub enum Op {
-    Update {
+#[derive(Clone)]
+enum Op {
+    UpdateCosts {
         u: usize,
         v: usize,
-        prev_icf: Weight,
-        prev_icp: Weight,
+        prev_costs: Costs,
     },
-}*/
+    UpdateMinBranchingNum(Option<EdgeWithBranchingNumber>),
+}
 
 impl InducedCosts {
     pub fn new_for_graph(g: &Graph<Weight>) -> Self {
@@ -74,7 +73,7 @@ impl InducedCosts {
             graph_size: size,
             cost_store,
             min_branching_num: None,
-            //       oplog: Vec::new(),
+            oplog: Vec::new(),
         };
 
         this.calculate_all_costs(g);
@@ -322,6 +321,8 @@ impl InducedCosts {
                 if (min_branching_num.u, min_branching_num.v) == (x, u)
                     || (min_branching_num.u, min_branching_num.v) == (u, x)
                 {
+                    self.oplog
+                        .push(Op::UpdateMinBranchingNum(self.min_branching_num));
                     self.min_branching_num = None;
                 }
             }
@@ -357,6 +358,13 @@ impl InducedCosts {
     ) {
         let idx = self.idx(u, v);
         let uv_costs = &mut self.cost_store[idx];
+
+        self.oplog.push(Op::UpdateCosts {
+            u,
+            v,
+            prev_costs: *uv_costs,
+        });
+
         uv_costs.icf += icf_diff;
         uv_costs.icp += icp_diff;
 
@@ -372,7 +380,10 @@ impl InducedCosts {
         };
 
         if let Some(current_min) = self.min_branching_num {
+            self.oplog
+                .push(Op::UpdateMinBranchingNum(self.min_branching_num));
             if new_branching_num <= current_min {
+                // TODO: This seems wrong! It sets the old one!
                 self.min_branching_num = Some(current_min);
             } else if (current_min.u, current_min.v) == (new_branching_num.u, new_branching_num.v) {
                 self.min_branching_num = None;
@@ -381,6 +392,8 @@ impl InducedCosts {
             // This means we may sometimes not actually have the real minimum in there.
             // Might still be worth a try like this, it shouldn't impact correctness.
             // To avoid that, just remove this else block.
+            self.oplog
+                .push(Op::UpdateMinBranchingNum(self.min_branching_num));
             self.min_branching_num = Some(new_branching_num);
         }
     }
@@ -425,6 +438,8 @@ impl InducedCosts {
                     .map(|b| edge_with_branching_num < b)
                     .unwrap_or(true)
                 {
+                    self.oplog
+                        .push(Op::UpdateMinBranchingNum(self.min_branching_num));
                     self.min_branching_num = Some(edge_with_branching_num);
                 }
             }
@@ -462,17 +477,23 @@ impl InducedCosts {
         }
     }
 
-    /*pub fn oplog_len(&self) -> usize {
+    pub fn oplog_len(&self) -> usize {
         self.oplog.len()
     }
 
     pub fn rollback_to(&mut self, oplog_len: usize) {
         for op in self.oplog.drain(oplog_len..).rev().collect::<Vec<_>>() {
             match op {
-                // TODO
+                Op::UpdateCosts { u, v, prev_costs } => {
+                    let idx = self.idx(u, v);
+                    self.cost_store[idx] = prev_costs;
+                    let idx = self.idx(v, u);
+                    self.cost_store[idx] = prev_costs;
+                }
+                Op::UpdateMinBranchingNum(prev_min) => self.min_branching_num = prev_min,
             }
         }
-    }*/
+    }
 
     #[inline(always)]
     fn idx(&self, u: usize, v: usize) -> usize {
