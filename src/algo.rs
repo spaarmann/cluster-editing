@@ -94,14 +94,18 @@ impl Parameters {
     }
 }
 
+// This is only used for debug state validation... it'd still be nicer to not put it into a static
+// mut, but oh well.
+static mut ORIGINAL_INPUT_GRAPH: Option<PetGraph> = None;
+
 pub fn execute_algorithm(graph: &PetGraph, params: &mut Parameters) -> (PetGraph, Vec<Edit>) {
     let mut result = graph.clone();
     let (g, imap) = Graph::<Weight>::new_from_petgraph(&graph);
     let (components, _) = g.split_into_components(&imap);
 
-    /*unsafe {
-        original_input_graph = Some(graph.clone());
-    }*/
+    unsafe {
+        ORIGINAL_INPUT_GRAPH = Some(graph.clone());
+    }
 
     info!(
         "Decomposed input graph into {} components",
@@ -220,67 +224,6 @@ pub fn execute_algorithm(graph: &PetGraph, params: &mut Parameters) -> (PetGraph
 
     (result, edits)
 }
-
-// A bit of code that can be useful for debugging, so I'm leaving it here
-// commented out for now.
-// When using it, remember to also comment in the line further up that sets
-// the static.
-/*static mut original_input_graph: Option<PetGraph> = None;
-fn print_current_deduplicated_edits(p: &mut ProblemInstance) {
-    let mut result = unsafe { original_input_graph.as_ref().unwrap().clone() };
-
-    for &edit in &p.edits {
-        match edit {
-            Edit::Insert(u, v) => {
-                if let None = result.find_edge(NodeIndex::new(u), NodeIndex::new(v)) {
-                    result.add_edge(NodeIndex::new(u), NodeIndex::new(v), 0);
-                }
-            }
-            Edit::Delete(u, v) => {
-                if let Some(e) = result.find_edge(NodeIndex::new(u), NodeIndex::new(v)) {
-                    result.remove_edge(e);
-                }
-            }
-        };
-    }
-
-    let mut edits = Vec::new();
-    let graph = unsafe { original_input_graph.as_ref().unwrap() };
-    for u in graph.node_indices() {
-        for v in graph.node_indices() {
-            if u == v {
-                continue;
-            }
-            if v > u {
-                continue;
-            }
-
-            let original = graph.find_edge(u, v);
-            let new = result.find_edge(u, v);
-
-            match (original, new) {
-                (None, Some(_)) => edits.push(Edit::Insert(
-                    *graph.node_weight(u).unwrap(),
-                    *graph.node_weight(v).unwrap(),
-                )),
-                (Some(_), None) => edits.push(Edit::Delete(
-                    *graph.node_weight(u).unwrap(),
-                    *graph.node_weight(v).unwrap(),
-                )),
-                _ => { /* no edit */ }
-            }
-        }
-    }
-
-    trace_and_path_log!(
-        p,
-        p.k,
-        "With k={} currently {} dedup'd edits: {:?}",
-        p.k,
-        edits.len(),
-        edits
-    );
-}*/
 
 // The imap is used to always have a mapping from the current indices used by the graph to
 // what indices those vertices have in the original graph.
@@ -416,6 +359,8 @@ impl<'a> ProblemInstance<'a> {
     // the WeightMap a lot, which are floats.
     fn find_cluster_editing(mut self) -> (bool, Self) {
         let _k_start = self.k;
+
+        //self.validate_current_state();
 
         let min_cost = self
             .conflicts
@@ -627,9 +572,39 @@ impl<'a> ProblemInstance<'a> {
         let branch_edge = if self.conflicts.conflict_count() > 0 {
             self.induced_costs
                 .get_edge_with_min_branching_number(&self.g)
+                .or_else(|| self.conflicts.get_next_conflict().map(|(u, v, _)| (u, v)))
         } else {
             None
         };
+
+        // TODO: In the presence of zero-edges, it is currently possible that no edge with
+        // non-infinite branching number can be found but we still have a conflict, so we fall back
+        // on that.
+        // This is (I think) because the induced cost calculations don't account for zero-edges.
+        // With this workaround it should not be a correctness issue, but for performance it might
+        // be nice to calculate more accurate induced costs; it could potentially lead to the
+        // induced cost reduction being applicable more often too.
+
+        //let conflict_edge = self.conflicts.get_next_conflict().map(|(u, v, _)| (u, v));
+        /*if branch_edge.is_none() && conflict_edge.is_some() {
+            let (u, v) = conflict_edge.unwrap();
+            let costs = self.induced_costs.get_costs(u, v);
+            let uv = self.g.get(u, v);
+            let branching_num = InducedCosts::get_branching_number(costs, uv);
+            log::error!("Found conflict but no branch_edge. Conflict edge {}-{} ({:?}-{:?}) with uv {}, costs {:?} and branching num {}", u, v, self.imap[u], self.imap[v], uv, costs, branching_num);
+
+            crate::graphviz::print_debug_graph(
+                "sfdp",
+                "debug.png",
+                &self.g.to_petgraph(Some(&self.imap), false),
+            );
+            crate::graphviz::print_debug_graph(
+                "sfdp",
+                "debug_inv.png",
+                &self.g.to_petgraph(Some(&self.imap), true),
+            );
+        }
+        assert_eq!(branch_edge.is_some(), conflict_edge.is_some());*/
 
         let (u, v) = match branch_edge {
             None => {
@@ -676,11 +651,12 @@ impl<'a> ProblemInstance<'a> {
         dbg_trace_indent!(
             self,
             _k_start,
-            "Found edge ({},{}) = ({:?}-{:?}), branching",
+            "Found edge ({},{}) = ({:?}-{:?}) with weight {}, branching",
             u,
             v,
             self.imap[u],
             self.imap[v],
+            self.g.get(u, v),
         );
 
         let edit_len = self.edits.len();
@@ -699,8 +675,15 @@ impl<'a> ProblemInstance<'a> {
             let uv = self.g.get(u, v);
             // TODO: Might not need this check after edge merging is in? Maybe?
             if uv.is_finite() {
-                self.k -= uv as f32;
-                self.params.stats.borrow_mut().k_red_from_branching += uv as f32;
+                if uv > Weight::ZERO {
+                    self.k -= uv;
+                    self.make_delete_edit(u, v);
+                    self.params.stats.borrow_mut().k_red_from_branching += uv;
+                }
+                if uv.abs() < 0.001 {
+                    self.k -= 0.5;
+                    self.params.stats.borrow_mut().k_red_from_zeroes += 0.5;
+                }
 
                 if self.k >= 0.0 {
                     dbg_trace_indent!(
@@ -720,7 +703,6 @@ impl<'a> ProblemInstance<'a> {
                     );
 
                     self.set(u, v, InfiniteNum::NEG_INFINITY);
-                    self.make_delete_edit(u, v);
 
                     self.find_cluster_editing()
                 } else {
@@ -914,6 +896,74 @@ impl<'a> ProblemInstance<'a> {
             }
             uw + vw
         }
+    }
+
+    pub fn validate_current_state(&self) {
+        let edits = self.calculate_current_deduplicated_edits();
+
+        let mut zero_count = 0;
+        for u in self.g.nodes() {
+            for v in (u + 1)..self.g.size() {
+                continue_if_not_present!(self.g, v);
+
+                if self.g.get(u, v).abs() < 0.001 {
+                    zero_count += 1;
+                }
+            }
+        }
+
+        let extra_k_for_zeroes = zero_count as f32 / 2.0;
+
+        assert_eq!(self.k_max - self.k + extra_k_for_zeroes, edits.len() as f32);
+    }
+
+    pub fn calculate_current_deduplicated_edits(&self) -> Vec<Edit> {
+        let mut result = unsafe { ORIGINAL_INPUT_GRAPH.as_ref().unwrap().clone() };
+
+        for &edit in &self.edits {
+            match edit {
+                Edit::Insert(u, v) => {
+                    if let None = result.find_edge(NodeIndex::new(u), NodeIndex::new(v)) {
+                        result.add_edge(NodeIndex::new(u), NodeIndex::new(v), 0);
+                    }
+                }
+                Edit::Delete(u, v) => {
+                    if let Some(e) = result.find_edge(NodeIndex::new(u), NodeIndex::new(v)) {
+                        result.remove_edge(e);
+                    }
+                }
+            };
+        }
+
+        let mut edits = Vec::new();
+        let graph = unsafe { ORIGINAL_INPUT_GRAPH.as_ref().unwrap() };
+        for u in graph.node_indices() {
+            for v in graph.node_indices() {
+                if u == v {
+                    continue;
+                }
+                if v > u {
+                    continue;
+                }
+
+                let original = graph.find_edge(u, v);
+                let new = result.find_edge(u, v);
+
+                match (original, new) {
+                    (None, Some(_)) => edits.push(Edit::Insert(
+                        *graph.node_weight(u).unwrap(),
+                        *graph.node_weight(v).unwrap(),
+                    )),
+                    (Some(_), None) => edits.push(Edit::Delete(
+                        *graph.node_weight(u).unwrap(),
+                        *graph.node_weight(v).unwrap(),
+                    )),
+                    _ => { /* no edit */ }
+                }
+            }
+        }
+
+        edits
     }
 }
 

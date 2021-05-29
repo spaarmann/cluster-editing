@@ -36,8 +36,8 @@ pub fn initial_param_independent_reduction(p: &mut ProblemInstance) -> f32 {
 
     // TODO: It would seem that merging steps above could potentially result in zero-edges in the
     // graph. The algorithm is generally described as requiring that *no* zero-edges are in the
-    // input, so doesn't this pose a problem?
-    // For now, this checks if we do ever produce any zero-edges and logs an error if so.
+    // input, so doesn't this pose a problem? -> Probably not, actually.
+    // Still, for now, this checks if we do ever produce any zero-edges and logs an error if so.
     for u in p.g.nodes() {
         for v in p.g.nodes() {
             if u == v {
@@ -365,6 +365,7 @@ pub fn rules123(p: &mut ProblemInstance) -> bool {
 
             debug_assert!(r.r1[u * p.g.size() + v] >= Weight::ZERO);
             debug_assert!(p.g.get(u, v) < Weight::ZERO);
+            debug_assert!(p.g.get(u, v).abs() > 0.001);
 
             p.set(u, v, InfiniteNum::NEG_INFINITY);
             any_applied = true;
@@ -1078,15 +1079,18 @@ fn induced_cost_reduction(p: &mut ProblemInstance) {
                 .conflicts
                 .min_cost_to_resolve_edge_disjoint_conflicts_ignoring(&p.g, u, v);
 
-            if induced_costs.icp + (-uv).max(Weight::ZERO) + bound > p.k {
+            if induced_costs.icp + bound > p.k {
                 trace_and_path_log!(
                     p,
                     p.k,
-                    "icp, forbid {:?}-{:?}, with icp {}, uv {} and k {}",
+                    "icp, forbid {:?}-{:?} ({}-{}), with icp {}, uv {}, bound {}, and k {}",
                     p.imap[u],
                     p.imap[v],
+                    u,
+                    v,
                     induced_costs.icp,
                     uv,
+                    bound,
                     p.k
                 );
 
@@ -1117,15 +1121,18 @@ fn induced_cost_reduction(p: &mut ProblemInstance) {
                 // ends up being better.
                 continue 'outer;
             }
-            if induced_costs.icf + uv.max(Weight::ZERO) + bound > p.k {
+            if induced_costs.icf + bound > p.k {
                 trace_and_path_log!(
                     p,
                     p.k,
-                    "icf, merge {:?}-{:?}, with icf {}, uv {} and k {}",
+                    "icf, merge {:?}-{:?} ({}-{}), with icf {}, uv {}, bound {} and k {}",
                     p.imap[u],
                     p.imap[v],
+                    u,
+                    v,
                     induced_costs.icf,
                     uv,
+                    bound,
                     p.k
                 );
 

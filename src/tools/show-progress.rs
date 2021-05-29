@@ -167,7 +167,7 @@ fn analyze_file<P: AsRef<Path>>(file: P) -> Result<RunProgress, Box<dyn Error>> 
                 );
             }
             if k != 0 {
-                log::warn!("Comp {} final k {} is not 0!", comp, k);
+                log::warn!("Comp {} final k {} is not 0 on {}!", comp, k, filename);
             }
 
             last_comp_finished = comp;

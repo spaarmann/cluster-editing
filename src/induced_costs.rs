@@ -168,6 +168,22 @@ impl InducedCosts {
 
             u += 1;
         }
+
+        /*for u in g.nodes() {
+            for v in (u + 1)..g.size() {
+                continue_if_not_present!(g, v);
+
+                let idx = self.idx(u, v);
+                let cost = self.cost_store[idx];
+                log::debug!(
+                    "calculate_all {}-{}: icf {}, icp {}",
+                    u,
+                    v,
+                    cost.icf,
+                    cost.icp
+                );
+            }
+        }*/
     }
 
     pub fn update(&mut self, g: &Graph<Weight>, x: usize, y: usize, prev: Weight, new: Weight) {
@@ -383,8 +399,7 @@ impl InducedCosts {
             self.oplog
                 .push(Op::UpdateMinBranchingNum(self.min_branching_num));
             if new_branching_num <= current_min {
-                // TODO: This seems wrong! It sets the old one!
-                self.min_branching_num = Some(current_min);
+                self.min_branching_num = Some(new_branching_num);
             } else if (current_min.u, current_min.v) == (new_branching_num.u, new_branching_num.v) {
                 self.min_branching_num = None;
             }
@@ -404,7 +419,7 @@ impl InducedCosts {
     }
 
     pub fn get_edge_with_min_branching_number(
-        &mut self, // TODO: This sohuldn't need to be mutable when done debugging
+        &mut self,
         g: &Graph<Weight>,
     ) -> Option<(usize, usize)> {
         if let Some(min_branching_num) = self.min_branching_num {
@@ -448,7 +463,7 @@ impl InducedCosts {
         return self.min_branching_num.map(|b| (b.u, b.v));
     }
 
-    fn get_branching_number(costs: Costs, uv: Weight) -> Weight {
+    pub fn get_branching_number(costs: Costs, uv: Weight) -> Weight {
         let delete_costs = uv.max(Weight::ZERO);
 
         if delete_costs < 0.0001 || costs.icp.abs() < 0.0001 {
