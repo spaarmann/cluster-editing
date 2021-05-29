@@ -396,11 +396,13 @@ impl InducedCosts {
         };
 
         if let Some(current_min) = self.min_branching_num {
-            self.oplog
-                .push(Op::UpdateMinBranchingNum(self.min_branching_num));
             if new_branching_num <= current_min {
+                self.oplog
+                    .push(Op::UpdateMinBranchingNum(self.min_branching_num));
                 self.min_branching_num = Some(new_branching_num);
             } else if (current_min.u, current_min.v) == (new_branching_num.u, new_branching_num.v) {
+                self.oplog
+                    .push(Op::UpdateMinBranchingNum(self.min_branching_num));
                 self.min_branching_num = None;
             }
         } else if new_branching_num.branching_num.is_finite() {
