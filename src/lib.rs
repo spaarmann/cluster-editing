@@ -19,6 +19,7 @@ pub mod graphviz;
 pub mod induced_costs;
 pub mod parser;
 pub mod reduction;
+pub mod upper_bound;
 
 pub type PetGraph = petgraph::Graph<usize, u8, petgraph::Undirected, u32>;
 pub type Weight = f32;
