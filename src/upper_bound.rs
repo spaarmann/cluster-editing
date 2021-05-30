@@ -18,11 +18,11 @@ pub fn calculate_upper_bound(mut p: ProblemInstance) -> f32 {
 
                 let uv = p.g.get(u, v);
                 let costs = p.induced_costs.get_costs(u, v);
-                let bound = p
-                    .conflicts
-                    .min_cost_to_resolve_edge_disjoint_conflicts_ignoring(&p.g, u, v);
+                /*let bound = p
+                .conflicts
+                .min_cost_to_resolve_edge_disjoint_conflicts_ignoring(&p.g, u, v);*/
 
-                let max_op = costs.icp.max(costs.icf) + bound;
+                let max_op = costs.icp.max(costs.icf); // + bound;
 
                 if uv.is_finite() && max.map(|(_, _, w)| max_op > w).unwrap_or(true) {
                     max = Some((u, v, max_op));
