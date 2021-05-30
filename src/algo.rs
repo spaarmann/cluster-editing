@@ -327,11 +327,11 @@ pub fn find_optimal_cluster_editing(
 
             best = Some((instance.k as i32, instance.edits));
         } else {
-            k_lb = k;
+            k_lb = k + 1.0;
         }
 
-        // We know there is no solution at `k_lb`, but there is one at `k_lb+1`, so return that.
-        if k_lb + 1.0 == k_ub {
+        // We know there is no solution below `k_lb`, but there is one at `k_lb`, so return that.
+        if k_lb == k_ub && best.is_some() {
             if !instance.path_log.is_empty() {
                 log::info!("Final path debug log:\n{}", instance.path_log);
             }
