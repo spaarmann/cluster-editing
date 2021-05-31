@@ -285,8 +285,8 @@ pub fn find_optimal_cluster_editing(
         .conflicts
         .min_cost_to_resolve_edge_disjoint_conflicts(&instance.g);
 
-    let mut k_lb = f32::max(min_cost.floor(), k_start);
-    let mut k_ub = k_upper_bound.ceil();
+    let k_lb = f32::max(min_cost.floor(), k_start);
+    let k_ub = k_upper_bound.ceil();
 
     if (k_lb == k_ub) && (k_lb == 0.0) {
         info!("Found solution without k=0!");
@@ -296,13 +296,11 @@ pub fn find_optimal_cluster_editing(
         return (0, instance.edits);
     }
 
-    let mut best = None;
+    //let mut best = None;
+    let mut k = k_lb;
     loop {
-        let k = ((k_lb + k_ub) / 2.0).floor();
-        info!(
-            "[driver] Starting search with k={} bounded in [{}, {}]...",
-            k, k_lb, k_ub
-        );
+        //let k = ((k_lb + k_ub) / 2.0).floor();
+        info!("[driver] Starting search with k={}...", k);
 
         let mut instance = instance.fork_new_branch();
         instance.k = k;
@@ -313,8 +311,9 @@ pub fn find_optimal_cluster_editing(
             write_stat_block(stats_dir, &params.stats.borrow(), comp_index, k as usize);
         }
 
-        // If we found a solution and know it's the best one:
-        if success && k == k_lb {
+        if success
+        /*&& k == k_lb*/
+        {
             if !instance.path_log.is_empty() {
                 log::info!("Final path debug log:\n{}", instance.path_log);
             }
@@ -322,7 +321,7 @@ pub fn find_optimal_cluster_editing(
             return (instance.k as i32, instance.edits);
         }
 
-        if success {
+        /*if success {
             k_ub = k;
 
             best = Some((instance.k as i32, instance.edits));
@@ -336,7 +335,9 @@ pub fn find_optimal_cluster_editing(
                 log::info!("Final path debug log:\n{}", instance.path_log);
             }
             return best.unwrap();
-        }
+        }*/
+
+        k += 1.0;
     }
 }
 
