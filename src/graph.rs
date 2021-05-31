@@ -183,12 +183,6 @@ impl<T: GraphWeight> Graph<T> {
         debug_assert!(self.present[u]);
         self.nodes()
             .filter(move |&v| u == v || self.get(u, v) > T::ZERO)
-        /*(0..u)
-        .filter(move |&v| self.present[v] && self.get(v, u) > T::ZERO)
-        .chain(std::iter::once(u))
-        .chain(
-            ((u + 1)..self.size).filter(move |&v| self.present[v] && self.get(u, v) > T::ZERO),
-        )*/
     }
 
     /// Returns the size of the graph.

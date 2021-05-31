@@ -32,24 +32,29 @@ pub fn initial_param_independent_reduction(p: &mut ProblemInstance) -> f32 {
 
     let k_start = (p.g.size() / 4) as f32;
 
-    full_param_independent_reduction(p, true);
-
     // TODO: It would seem that merging steps above could potentially result in zero-edges in the
     // graph. The algorithm is generally described as requiring that *no* zero-edges are in the
     // input, so doesn't this pose a problem? -> Probably not, actually.
     // Still, for now, this checks if we do ever produce any zero-edges and logs an error if so.
+    // A zero-edge here would now actually be a problem, for the edge cut reduction that comes
+    // next, see the comments on its definition.
     for u in p.g.nodes() {
         for v in p.g.nodes() {
             if u == v {
                 continue;
             }
             if p.g.get(u, v).is_zero() {
-                log::error!("Produced a zero-edge during parameter-independent reduction!");
+                panic!("Produced a zero-edge during parameter-independent reduction!");
             }
         }
     }
 
-    k_start
+    p.k = k_start;
+    edge_cut_reduction(p);
+
+    full_param_independent_reduction(p, true);
+
+    p.k.max(0.0)
 }
 
 pub fn param_dependent_reduction(p: &mut ProblemInstance) {
@@ -141,9 +146,6 @@ pub fn full_param_independent_reduction(p: &mut ProblemInstance, is_initial: boo
 }
 
 pub fn fast_param_independent_reduction(p: &mut ProblemInstance) {
-    // TODO: Optimize at least rules 1-3 ! This is a super naive implementation, even the paper directly
-    // describes a better strategy for doing it.
-
     let _k_start = p.k;
     dbg_trace_indent!(
         p,
@@ -1151,5 +1153,95 @@ fn induced_cost_reduction(p: &mut ProblemInstance) {
         }
 
         u += 1;
+    }
+}
+
+// From "Cluster Editing: Kernelization Based on Edge Cuts", Cao and Chen, 2012.
+// As described in the paper, this relies on the absence of zero-edges. As a starting point, we
+// simply only apply it once during the initial reduction step, when the graph cannot contain any
+// zero-edges yet.
+// As possible future expansions, it might be possible to selectively apply the reduction for
+// intermediate graphs or subgraphs where we have checked no zero-edges are present, or maybe even
+// adjust the reduction to cope with zero-edges.
+fn edge_cut_reduction(p: &mut ProblemInstance) {
+    let mut potential_inserts = Vec::new();
+
+    for v in 0..p.g.size() {
+        continue_if_not_present!(p.g, v);
+
+        let mut deficiency = Weight::ZERO;
+        let mut gamma = Weight::ZERO;
+        let mut closed_neighbor_count = 0;
+
+        potential_inserts.clear();
+
+        for x in p.g.closed_neighbors(v) {
+            closed_neighbor_count += 1;
+
+            for y in p.g.closed_neighbors(v) {
+                if y >= x {
+                    continue;
+                }
+
+                let xy = p.g.get(x, y);
+                if xy <= Weight::ZERO {
+                    deficiency += -xy;
+                    potential_inserts.push((x, y, xy));
+                }
+            }
+
+            for y in p.g.nodes() {
+                if x == y || v == y || p.g.get(v, y) > Weight::ZERO {
+                    continue;
+                }
+
+                let xy = p.g.get(x, y);
+                if xy > Weight::ZERO {
+                    gamma += xy;
+                }
+            }
+        }
+
+        let stable_cost = 2.0 * deficiency + gamma;
+        let reducible = stable_cost < closed_neighbor_count as Weight;
+
+        if reducible {
+            // We can make N[v] a clique!
+            // Which is a little awkward right now!
+            //
+            // Normally, at this point, we'd just merge all those vertices into one.
+            // But that may produce zero-edges, which, as mentioned above, aren't really something
+            // the reduction handles well, so we could only ever apply it once to a single vertex!
+            //
+            // So, instead, for now, we make an insert edit without merging. These edges *should*
+            // be set to permanent (+inf weight) in the process, but this is once more problematic,
+            // because I'm pretty sure there is code that expects "uv.is_infinite() => uv is
+            // forbidden" to hold *somewhere* right now, because permanent edges are not possible
+            // without this. I will try fixing this, but for now we simply do not set them to
+            // permanent.
+            // TODO ^
+            for &(x, y, xy) in &potential_inserts {
+                p.set(x, y, -xy);
+                p.make_insert_edit(x, y);
+                p.k -= -xy;
+
+                trace_and_path_log!(
+                    p,
+                    p.k,
+                    "edge cuts, inserting {:?}-{:?} ({}-{})",
+                    p.imap[x],
+                    p.imap[y],
+                    x,
+                    y
+                );
+                log::info!(
+                    "edge cuts, inserting {:?}-{:?} ({}-{})",
+                    p.imap[x],
+                    p.imap[y],
+                    x,
+                    y
+                );
+            }
+        }
     }
 }
