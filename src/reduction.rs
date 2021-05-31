@@ -1,5 +1,6 @@
 use crate::{
-    algo::ProblemInstance, critical_cliques, graph::GraphWeight, util::InfiniteNum, Graph, Weight,
+    algo::ProblemInstance, conflicts::ConflictStore, critical_cliques, graph::GraphWeight,
+    induced_costs::InducedCosts, util::InfiniteNum, Graph, Weight,
 };
 
 use std::collections::BTreeSet;
@@ -24,6 +25,7 @@ pub struct ReductionStorage {
 }
 
 /// The reduction assumes an unweighted graph as input (i.e. one with only weights 1 and -1).
+/// It also assumes that `p.k` contains an upper bound for `k`.
 pub fn initial_param_independent_reduction(p: &mut ProblemInstance) -> f32 {
     // Simply merging all critical cliques leads to a graph with at most 4 * k_opt vertices.
     let (g, imap) = critical_cliques::merge_cliques(&p.g, &p.imap, &mut p.path_log);
@@ -31,6 +33,12 @@ pub fn initial_param_independent_reduction(p: &mut ProblemInstance) -> f32 {
     p.imap = imap;
 
     let k_start = (p.g.size() / 4) as f32;
+
+    // Since we replaced the graph, calculate new conflicts and induced cost data.
+    p.conflicts = ConflictStore::new_for_graph(&p.g);
+    p.induced_costs = InducedCosts::new_for_graph(&p.g);
+
+    induced_cost_reduction(p);
 
     full_param_independent_reduction(p, true);
 

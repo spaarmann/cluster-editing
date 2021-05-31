@@ -248,13 +248,9 @@ pub fn find_optimal_cluster_editing(
     let mut _path_debugs = String::new();
     let mut instance = ProblemInstance::new(params, g.clone(), imap.clone());
     let k_upper_bound = upper_bound::calculate_upper_bound(instance.clone());
+    instance.k = k_upper_bound;
+    instance.k_max = k_upper_bound;
     let k_start = reduction::initial_param_independent_reduction(&mut instance);
-
-    // `initial_param_independent_reduction` currently actually replaces the graph with
-    // a completely new one. This isn't a great state of affair, it incurs a good amount
-    // of unnecessary overhead, but it only happens once per component, so, eh.
-    instance.conflicts = ConflictStore::new_for_graph(&instance.g);
-    instance.induced_costs = InducedCosts::new_for_graph(&instance.g);
 
     info!(
         "Reduced graph from {} nodes to {} nodes using parameter-independent reduction. Calculated uppper bound of {}",
