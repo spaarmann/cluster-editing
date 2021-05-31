@@ -2,7 +2,7 @@ use crate::{
     conflicts::ConflictStore,
     graph::{GraphWeight, IndexMap},
     induced_costs::InducedCosts,
-    reduction, upper_bound,
+    reduction,
     util::{FloatKey, InfiniteNum},
     Graph, PetGraph, Weight,
 };
@@ -247,16 +247,18 @@ pub fn find_optimal_cluster_editing(
 
     let mut _path_debugs = String::new();
     let mut instance = ProblemInstance::new(params, g.clone(), imap.clone());
-    let k_upper_bound = upper_bound::calculate_upper_bound(instance.clone());
-    instance.k = k_upper_bound;
-    instance.k_max = k_upper_bound;
     let k_start = reduction::initial_param_independent_reduction(&mut instance);
 
+    // `initial_param_independent_reduction` currently actually replaces the graph with
+    // a completely new one. This isn't a great state of affair, it incurs a good amount
+    // of unnecessary overhead, but it only happens once per component, so, eh.
+    instance.conflicts = ConflictStore::new_for_graph(&instance.g);
+    instance.induced_costs = InducedCosts::new_for_graph(&instance.g);
+
     info!(
-        "Reduced graph from {} nodes to {} nodes using parameter-independent reduction. Calculated uppper bound of {}",
+        "Reduced graph from {} nodes to {} nodes using parameter-independent reduction.",
         original_node_count,
-        instance.g.size(),
-        k_upper_bound,
+        instance.g.size()
     );
 
     params.stats.borrow_mut().initial_reduction = original_node_count - instance.g.size();
@@ -281,21 +283,8 @@ pub fn find_optimal_cluster_editing(
         .conflicts
         .min_cost_to_resolve_edge_disjoint_conflicts(&instance.g);
 
-    let k_lb = f32::max(min_cost.floor(), k_start);
-    let k_ub = k_upper_bound.ceil();
-
-    if (k_lb == k_ub) && (k_lb == 0.0) {
-        info!("Found solution without k=0!");
-        if !instance.path_log.is_empty() {
-            log::info!("Final path debug log:\n{}", instance.path_log);
-        }
-        return (0, instance.edits);
-    }
-
-    //let mut best = None;
-    let mut k = k_lb;
+    let mut k = f32::max(min_cost.floor(), k_start);
     loop {
-        //let k = ((k_lb + k_ub) / 2.0).floor();
         info!("[driver] Starting search with k={}...", k);
 
         let mut instance = instance.fork_new_branch();
@@ -307,31 +296,13 @@ pub fn find_optimal_cluster_editing(
             write_stat_block(stats_dir, &params.stats.borrow(), comp_index, k as usize);
         }
 
-        if success
-        /*&& k == k_lb*/
-        {
+        if success {
             if !instance.path_log.is_empty() {
                 log::info!("Final path debug log:\n{}", instance.path_log);
             }
 
             return (instance.k as i32, instance.edits);
         }
-
-        /*if success {
-            k_ub = k;
-
-            best = Some((instance.k as i32, instance.edits));
-        } else {
-            k_lb = k + 1.0;
-        }
-
-        // We know there is no solution below `k_lb`, but there is one at `k_lb`, so return that.
-        if k_lb == k_ub && best.is_some() {
-            if !instance.path_log.is_empty() {
-                log::info!("Final path debug log:\n{}", instance.path_log);
-            }
-            return best.unwrap();
-        }*/
 
         k += 1.0;
     }
