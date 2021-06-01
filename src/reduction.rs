@@ -1207,40 +1207,69 @@ fn edge_cut_reduction(p: &mut ProblemInstance) {
 
         if reducible {
             // We can make N[v] a clique!
-            // Which is a little awkward right now!
-            //
-            // Normally, at this point, we'd just merge all those vertices into one.
-            // But that may produce zero-edges, which, as mentioned above, aren't really something
-            // the reduction handles well, so we could only ever apply it once to a single vertex!
-            //
-            // So, instead, for now, we make an insert edit without merging. These edges *should*
-            // be set to permanent (+inf weight) in the process, but this is once more problematic,
-            // because I'm pretty sure there is code that expects "uv.is_infinite() => uv is
-            // forbidden" to hold *somewhere* right now, because permanent edges are not possible
-            // without this. I will try fixing this, but for now we simply do not set them to
-            // permanent.
-            // TODO ^
-            for &(x, y, xy) in &potential_inserts {
-                p.set(x, y, -xy);
-                p.make_insert_edit(x, y);
-                p.k -= -xy;
 
+            // Rule 1: Insert missing edges:
+            for &(x, y, xy) in &potential_inserts {
+                p.g.set(x, y, -xy);
+                p.make_insert_edit(x, y);
                 trace_and_path_log!(
                     p,
                     p.k,
-                    "edge cuts, inserting {:?}-{:?} ({}-{})",
+                    "edge cuts, insert {:?}-{:?} ({}-{})",
                     p.imap[x],
                     p.imap[y],
                     x,
                     y
                 );
-                log::info!(
-                    "edge cuts, inserting {:?}-{:?} ({}-{})",
-                    p.imap[x],
-                    p.imap[y],
-                    x,
-                    y
-                );
+            }
+
+            // Rule 2: Delete some edges around the clique:
+            for x in 0..p.g.size() {
+                if !p.g.is_present(x) || (x != v && p.g.get(v, x) <= Weight::ZERO) {
+                    continue;
+                }
+
+                for y in 0..p.g.size() {
+                    if !p.g.is_present(y) || x == y || v == y || p.g.get(x, y) <= Weight::ZERO {
+                        continue;
+                    }
+
+                    let vy = p.g.get(v, y);
+                    if vy > Weight::ZERO {
+                        continue;
+                    }
+
+                    // y is in N(N[v])
+
+                    let mut total_weight = Weight::ZERO;
+                    for z in p.g.closed_neighbors(v) {
+                        total_weight += p.g.get(y, z);
+                    }
+
+                    if total_weight <= Weight::ZERO {
+                        // We can delete all the edges from y to N[v]
+                        for z in 0..p.g.size() {
+                            if !p.g.is_present(z) || (z != v && p.g.get(v, z) <= Weight::ZERO) {
+                                continue;
+                            }
+
+                            let yz = p.g.get(y, z);
+                            if yz > Weight::ZERO {
+                                p.g.set(y, z, -yz);
+                                p.make_delete_edit(y, z);
+                                trace_and_path_log!(
+                                    p,
+                                    p.k,
+                                    "edge cuts, delete {:?}-{:?} ({}-{})",
+                                    p.imap[y],
+                                    p.imap[z],
+                                    y,
+                                    z
+                                );
+                            }
+                        }
+                    }
+                }
             }
         }
     }
