@@ -1,7 +1,8 @@
 # Pandora
 
-Pandora is a solver for the `Cluster Editing` problem, written for my bachelor thesis and as a
-submission for the [PACE Challenge 2021](https://pacechallenge.org/2021/).
+Pandora is a solver for the `Cluster Editing` problem, written for
+[my bachelor thesis](https://github.com/spaarmann/bachelor-thesis) and as a submission for the
+[PACE Challenge 2021](https://pacechallenge.org/2021/).
 
 The solver follows a fixed-parameter approach, combining various techniques introduced in existing
 publications on the topic. It solves the unweighted problem as required by the PACE challenge, but
