@@ -1211,6 +1211,7 @@ fn edge_cut_reduction(p: &mut ProblemInstance) {
             // Rule 1: Insert missing edges:
             for &(x, y, xy) in &potential_inserts {
                 p.g.set(x, y, -xy);
+                p.k -= -xy;
                 p.make_insert_edit(x, y);
                 trace_and_path_log!(
                     p,
@@ -1256,6 +1257,7 @@ fn edge_cut_reduction(p: &mut ProblemInstance) {
                             let yz = p.g.get(y, z);
                             if yz > Weight::ZERO {
                                 p.g.set(y, z, -yz);
+                                p.k -= yz;
                                 p.make_delete_edit(y, z);
                                 trace_and_path_log!(
                                     p,
