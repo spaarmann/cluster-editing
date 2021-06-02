@@ -9,7 +9,7 @@ internally works largely based on an equivalent weighted instance, and would be 
 also solve weighted input instances. A more detailed description of the techniques used will be
 added soon.
 
-## Installation and External Libraries
+## Installation
 
 The solver is written in Rust, and compiled using the standard `cargo` tool. It currently uses two
 unstable standard library features and thus requires a *nightly* Rust version.
@@ -27,6 +27,14 @@ $ cargo build --release
 
 An executable will then be placed into `target/release/cluster-editing`. Adjust as appropriate if a
 toolchain is already installed etc.
+
+The resulting binary will be optimized for the system it was compiled on, possibly using instruction
+set extensions that are supported there but not necessarily widely on other systems, and dynamically
+linked to the system `libc`. One can also compile using `./compile_optilio.sh` to target a CPU model
+compatible with the optil.io system used by the PACE challenge and with a statically linked MUSL
+libc, for greater portability. (This is how the submission for the challenge was compiled.)
+
+## External Libraries
 
 The solver uses some open-source libraries from `crates.io`, which are automatically downloaded
 during the build process by `cargo`:
