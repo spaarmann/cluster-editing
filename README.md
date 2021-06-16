@@ -7,8 +7,10 @@ Pandora is a solver for the `Cluster Editing` problem, written for
 The solver follows a fixed-parameter approach, combining various techniques introduced in existing
 publications on the topic. It solves the unweighted problem as required by the PACE challenge, but
 internally works largely based on an equivalent weighted instance, and would be easy to adjust to
-also solve weighted input instances. A more detailed description of the techniques used will be
-added soon.
+also solve weighted input instances. An overview of the techniques used can be found in the [solver
+description](./description/pandora-solver-desc.pdf). A much more in-depth description is available
+in the form of
+[my thesis](https://github.com/spaarmann/bachelor-thesis/blob/main/pdf/ClusterEditing_Current.pdf).
 
 ## Installation
 
