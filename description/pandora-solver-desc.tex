@@ -1,0 +1,269 @@
+
+\documentclass[a4paper,UKenglish,cleveref, autoref, thm-restate]{lipics-v2021}
+%This is a template for producing LIPIcs articles. 
+%See lipics-v2021-authors-guidelines.pdf for further information.
+%for A4 paper format use option "a4paper", for US-letter use option "letterpaper"
+%for british hyphenation rules use option "UKenglish", for american hyphenation rules use option "USenglish"
+%for section-numbered lemmas etc., use "numberwithinsect"
+%for enabling cleveref support, use "cleveref"
+%for enabling autoref support, use "autoref"
+%for anonymousing the authors (e.g. for double-blind review), add "anonymous"
+%for enabling thm-restate support, use "thm-restate"
+%for enabling a two-column layout for the author/affilation part (only applicable for > 6 authors), use "authorcolumns"
+%for producing a PDF according the PDF/A standard, add "pdfa"
+
+%\graphicspath{{./graphics/}}%helpful if your graphic files are in another directory
+
+\bibliographystyle{plainurl}% the mandatory bibstyle
+
+\title{The 'Pandora' Cluster Editing Solver}
+
+%\titlerunning{Dummy short title} %optional, please use if title is longer than one line
+
+\author{Sebastian Paarmann}{Technische Universität Hamburg, Germany}{sebastian.paarmann@tuhh.de}{}{}
+
+\authorrunning{S. Paarmann} %mandatory. First: Use abbreviated first/middle names. Second (only in severe cases): Use first author plus 'et al.'
+
+\Copyright{Sebastian Paarmann} %mandatory, please use full first names. LIPIcs license is "CC-BY";  http://creativecommons.org/licenses/by/3.0/
+
+\begin{CCSXML}
+<ccs2012>
+   <concept>
+       <concept_id>10010405</concept_id>
+       <concept_desc>Applied computing</concept_desc>
+       <concept_significance>500</concept_significance>
+       </concept>
+   <concept>
+       <concept_id>10002950.10003624.10003633.10010917</concept_id>
+       <concept_desc>Mathematics of computing~Graph algorithms</concept_desc>
+       <concept_significance>500</concept_significance>
+       </concept>
+   <concept>
+       <concept_id>10002950.10003705.10003707</concept_id>
+       <concept_desc>Mathematics of computing~Solvers</concept_desc>
+       <concept_significance>300</concept_significance>
+       </concept>
+ </ccs2012>
+\end{CCSXML}
+
+\ccsdesc[500]{Applied computing}
+\ccsdesc[500]{Mathematics of computing~Graph algorithms}
+\ccsdesc[300]{Mathematics of computing~Solvers}
+
+\keywords{Cluster Editing, fixed-parameter algorithms, graph theory, PACE challenge} %mandatory; please add comma-separated list of keywords
+
+\category{} %optional, e.g. invited paper
+
+\relatedversion{} %optional, e.g. full version hosted on arXiv, HAL, or other repository/website
+%\relatedversiondetails[linktext={opt. text shown instead of the URL}, cite=DBLP:books/mk/GrayR93]{Classification (e.g. Full Version, Extended Version, Previous Version}{URL to related version} %linktext and cite are optional
+
+% TODO: Mention source code here
+\supplement{Source code available on Github and on Zenodo}%optional, e.g. related research data, source code, ... hosted on a repository like Zenodo, figshare, GitHub, ...
+\supplementdetails[cite=paarmann_sebastian_2021_4964394]{Software}{https://github.com/spaarmann/cluster-editing} %linktext, cite, and subcategory are optional
+
+%\funding{(Optional) general funding statement \dots}%optional, to capture a funding statement, which applies to all authors. Please enter author specific funding statements as fifth argument of the \author macro.
+
+\acknowledgements{I want to thank Prof. Dr. Matthias Mnich and Dr. Jens M. Schmidt who were my
+advisors on the Bachelor thesis that resulted in this work.}%optional
+
+\nolinenumbers %uncomment to disable line numbering
+
+% TODO: Probably do this?
+\hideLIPIcs  %uncomment to remove references to LIPIcs series (logo, DOI, ...), e.g. when preparing a pre-final version to be uploaded to arXiv or another public repository
+
+% TODO: ???
+%Editor-only macros:: begin (do not touch as author)%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\EventEditors{John Q. Open and Joan R. Access}
+\EventNoEds{2}
+\EventLongTitle{42nd Conference on Very Important Topics (CVIT 2016)}
+\EventShortTitle{CVIT 2016}
+\EventAcronym{CVIT}
+\EventYear{2016}
+\EventDate{December 24--27, 2016}
+\EventLocation{Little Whinging, United Kingdom}
+\EventLogo{}
+\SeriesVolume{42}
+\ArticleNo{23}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\usepackage{mathtools}
+
+% This declares \abs and \norm commands
+\DeclarePairedDelimiter\abs{\lvert}{\rvert}%
+\DeclarePairedDelimiter\norm{\lVert}{\rVert}%
+
+% Swap the definition of \abs* and \norm*, so that \abs
+% and \norm resizes the size of the brackets, and the
+% starred version does not.
+\makeatletter
+\let\oldabs\abs
+\def\abs{\@ifstar{\oldabs}{\oldabs*}}
+%
+\let\oldnorm\norm
+\def\norm{\@ifstar{\oldnorm}{\oldnorm*}}
+\makeatother
+
+\begin{document}
+
+\maketitle
+
+%mandatory: add short abstract of the document
+\begin{abstract}
+	'Pandora' is a solver for the \textsc{Cluster Editing} problem developed for the PACE Challenge
+	2021. It is based on a fixed-parameter bounded search tree algorithm and multiple data reduction
+	rules.
+\end{abstract}
+
+\section{Introduction}
+\label{sec:introduction}
+
+This document provides a brief description of the techniques employed in creating the 'Pandora'
+solver for the \textsc{Cluster Editing} problem. It is part of the submission of the solver to the
+PACE Challenge 2021. % TODO: Cite?
+The solver was written as part of a Bachelor thesis in Computer Science, and a much more detailed
+description of most of the solver is also available in form of the thesis itself, although some
+improvements have been made to the solver after the thesis was finalized. % TODO Cite/reference
+
+As a brief introduction, the \textsc{Cluster Editing} problem asks to transform an arbitrary
+unweighted, undirected input graph into a \emph{cluster graph}. A cluster graph is a graph in which
+every connected component forms a clique, i.e.\ it consists only of one or more disjoint cliques.
+This transformation should be achieved by producing a set of edges to either insert or delete from
+the graph, and when solving the problem exactly, the goal is to find a \emph{minimal} set of edits
+that results in a cluster graph.
+
+Formally, for an input graph $G = (V, E)$ the goal is to find an $F \subseteq \binom{V}{2}$ such
+that $(V, E \Delta F)$ is a cluster graph and $\abs{F}$ is minimal.
+
+%\enlargethispage{\baselineskip} TODO?
+
+\section{Bounded Search Tree Algorithm}
+
+Internally, the input problem instance is converted into an equivalent instance for the
+\textsc{Weighted Cluster Editing} problem. Here, the graph is characterized by a weight (or
+\emph{cost}) function $s\colon \binom{V}{2} \to \mathbb{Z}$, such that $uv \in E \Leftrightarrow
+s(uv) > 0$. For an edge $uv \in E$, $s(uv)$ are the deletion costs of the edge, while for a pair $uv
+\notin E$, $-s(uv)$ are the insertion costs. The cost of a cluster editing $F$ is then $\sum_{e \in
+F} \abs{s(e)}$ and the goal to find a cluster editing with minimal cost.
+
+The solver implements a \emph{fixed-parameter algorithm}, where the problem has an additional
+parameter $k$ which limits the allowed cost of a solution. Thus, for an input $(G, k)$ it should
+return a solution $F$ if a solution with cost less than or equal $k$ exists, or 'no solution'
+otherwise. To solve the original optimization problem, the algorithm is simply executed repeatedly
+with increasing $k$ to find the minimal $k$ for which a solution can be found.
+
+The basic structure of the algorithm is a \emph{bounded search tree}. The search tree strategy
+implemented was introduced by Böcker et.\ al \cite{DBLP:journals/tcs/BockerBBT09} and
+briefly repeated here: We choose an edge $uv \in E$ to branch and take two branches: Forbidding $uv$
+and \emph{merging} $uv$. To forbid $uv$ we reduce $k$ by $s(uv)$ and set $s(uv) = -\infty$, deleting
+the edge from the graph. Merging $uv$ means removing both $u$ and $v$ from the graph and replacing
+them by a new vertex $u'$, setting $s(u'w) = s(uw) + s(vw) \forall w \in V \setminus \{u, v\}$. For
+$s(uw) \neq -s(vw)$, $k$ can be reduced by $\min\{\abs{s(uw)}, \abs{s(vw}\}$. For $s(uw) = s(vw)$,
+the resulting edge $u'w$ has weight $0$ which requires some additional care; this is described in
+more detail in the original paper by Böcker et al. After merging $u$ and $v$ are considered to have
+a permanent edge between them.
+
+At every branching step we choose the edge $uv \in E$ that minimizes the \emph{branching number} of
+the corresponding branching step. The branching number can be calculated from the branching vector
+$(a, b)$ where $a$ is the cost of deleting $uv$ and $b$ is the cost of merging $uv$. For a
+description of how a branching number can be derived from the branching vector, see e.g.\
+\cite{DBLP:books/sp/CyganFKLMPPS15}.
+In practice we have pre-computed a polynomial function that approximates the branching number from
+the branching vector to allow quick computation. This branching strategy results in a search tree of
+size $O(2^k)$.
+
+Before each branching step we also calculate a simple lower bound for the remaining cost. If that
+lower bound exceeds the current parameter $k$, we can immediately return 'no solution' for this
+branch of the search tree.
+
+\section{Reduction Rules}
+
+The solver also implements multiple \emph{reduction rules} which can reduce the size or complexity
+of a problem instance by essentially proving that certain edits must be part of an optimal solution
+(in general, or in the current part of the search tree).
+
+The first reduction is based on the idea of \emph{critical cliques} in the unweighted input graph:
+
+\begin{definition}
+	A \emph{critical clique} $K$ is an induced clique in $G$ where all vertices of $K$ have the same
+    set of neighbors outside of $K$, and $K$ is maximal under this property.
+\end{definition}
+
+Guo proved that an optimal cluster editing will never split a critical clique into multiple clusters
+\cite{DBLP:journals/tcs/Guo09}. As a first step in the algorithm, for every critical clique $K$, we
+can merge all the vertices of $K$ into a single vertex, transforming the unweighted input into an
+equivalent weighted one that the remainder of the algorithm works on.
+
+We also implement a set of parameter-independent reductions that are applied once at the start, and
+then again at regular intervals on the intermediate instances in the search tree. These were
+described by Böcker et al.\ in \cite{DBLP:journals/algorithmica/BockerBK11}.
+\subparagraph{Rule 1} \emph{(heavy non-edge rule)} Forbid a non-edge $uv$ with $s(uv) < 0$ if
+\[
+    \abs{s(uv)} \geq \sum_{w \in N(u)} s(uw).
+\]
+
+\subparagraph{Rule 2} \emph{(heavy edge rule, single end)} Merge vertices $u, v$ of an edge $uv$ if
+\[
+    s(uv) \geq \sum_{w \in V \setminus \{u, v\}} \abs{s(uw)}.
+\]
+
+\subparagraph{Rule 3} \emph{(heave edge rule, both ends)} Merge vertices $u, v$ of an edge $uv$ if
+\[
+    s(uv) \geq \sum_{w \in N(u) \setminus \{v\}} s(uw) + \sum_{w \in N(v) \setminus \{u\}} s(vw).
+\]
+
+\subparagraph{Rule 4} \emph{(almost clique rule)} Let $k_C$ be the min-cut value of $G[C]$, for $C
+\subseteq V$. The vertices of $C$ can be merged if
+\[
+    k_C \geq \sum_{u,v \in C, s(uv) \leq 0} \abs{s(uv)}
+        + \sum_{u \in C, v \in V \setminus C, s(uv) > 0} s(uv).
+\]
+
+\subparagraph{Rule 5} \emph{(similar neighborhood)} Merge $uv$ if
+\begin{equation} \label{eq:rule5}
+    s(uv) \geq \max_{C_u, C_v} \min\{s(v, C_v) - s(v, C_u) + \Delta_v, s(u, C_u) - s(u, C_v) +
+    \Delta_u\}
+\end{equation}
+with the maximum running over all $C_u, C_v \subseteq W$ with $C_u \cap C_v = \emptyset$.
+
+Böcker et al.\ \cite{DBLP:conf/apbc/BockerBBT08} also introduced a parameter-dependent reduction
+that takes into account the current parameter $k$. We first define for each pair $uv$ the
+\emph{induced costs} of forbidding or merging it:
+\begin{align*}
+    \mathsf{icf}(uv) &= \sum_{w \in N(u) \cap N(v)} \min\{s(uw), s(vw)\} \\
+    \mathsf{icp}(uv) &= \sum_{w \in (N(u) \Delta N(v)) \setminus \{u, v\}}
+        \min\{\abs{s(uw)}, \abs{s(vw)}\}
+\end{align*}
+
+One can then show that the following reduction rules are correct:
+\begin{itemize}
+	\item For $u, v \in V$ where $\mathsf{icf}(uv) + \max\{0, s(uv)\} + b(G, uv) > k$: Merge $u$ and $v$
+	\item For $u, v \in V$ where $\mathsf{icp}(uv) + \max\{0, -s(uv)\} + b(G, uv) > k$: Forbid $uv$
+\end{itemize}
+where $b(G, uv)$ is a lower bound on the cost of an optimal solution for solving $G - \{u, v\}$.
+
+And finally we also implemented a reduction rule derived from a kernelization based on edge cuts
+introduced by Cao and Cen \cite{DBLP:journals/algorithmica/CaoC12}. The original kernelization and
+reduction only works for graphs that do not contain any edges with weight $0$, however as we
+mentioned before, such edges can be created by the merging procedure. We thus only apply the
+reduction once at the beginning, before any zero edges can have been produced.
+
+First, for a vertex $v \in V$ define the \emph{deficiency}
+$\delta(v) = \sum_{x, y \in N(v), xy \notin E} -s(xy)$ and for a set $S \subseteq V$ define
+$\gamma(S) = \sum_{x \in S, y \in V \setminus S, xy \in E} s(xy)$. Then the \emph{stable cost} of
+$v$ is defined as $\rho(v) = 2\delta(v) + \gamma(N[v])$ and $N[v]$ is \emph{reducible} if $\rho(v) <
+\abs{N[v]}$. If $N[v]$ is reducible, we can insert any missing edges in $G[N[v]$ to make it a
+clique, reducing $k$ appropriately. Additionally, for each $x \in N(N[v])$, if the total weight of
+edges between $x$ and $N[v]$ is less than or equal to the weight of all non-edges between $x$ and
+$N[v]$, then we can delete all edges between $x$ and $N[v]$ and reduce $k$ appropriately.
+
+%%
+%% Bibliography
+%%
+
+%% Please use bibtex, 
+
+\bibliography{pandora-solver-desc}
+
+%\appendix
+
+\end{document}

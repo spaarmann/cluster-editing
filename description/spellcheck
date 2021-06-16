@@ -1,0 +1,2 @@
+#!/usr/bin/env fish
+ispell -t -T utf8 pandora-solver-desc.tex
